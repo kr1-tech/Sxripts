@@ -63,7 +63,7 @@ local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
+local _HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
@@ -224,10 +224,15 @@ pcall(function()
 end)
 
 local sharedTable = _G :: any
-local oldCleanup = sharedTable.SentinelUtilityCleanup
+local oldCleanup: any = nil
+pcall(function()
+	oldCleanup = sharedTable.SentinelUtilityCleanup
+end)
 if typeof(oldCleanup) == "function" then
 	pcall(oldCleanup)
-	sharedTable.SentinelUtilityCleanup = nil
+	pcall(function()
+		sharedTable.SentinelUtilityCleanup = nil
+	end)
 end
 
 -- SECTION 3: STATE MANAGEMENT
@@ -376,6 +381,21 @@ local stopNoclip: () -> () = function() end
 local setFlightVisual: ((boolean) -> ())? = nil
 local setOrbitVisual: ((boolean) -> ())? = nil
 local setHeadSitVisual: ((boolean) -> ())? = nil
+
+local pages: { [string]: ScrollingFrame } = {}
+local tabButtons: { [string]: TextButton } = {}
+local cleanupAll: () -> () = function() end
+
+type FeatureEntry = {
+	id: string,
+	label: string,
+	description: string,
+	availability: string,
+	category: string,
+	execute: (() -> ())?,
+}
+
+local FeatureRegistry: { [string]: FeatureEntry } = {}
 
 
 
@@ -996,7 +1016,7 @@ local function createTabButton(id: string, label: string)
 	end))
 end
 
-local function createInfoCard(parent: Instance, title: string, bodyText: string)
+local function _createInfoCard(parent: Instance, title: string, bodyText: string)
 	local _, content = createCard(parent, title)
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.new(1, 0, 0, 0)
@@ -2039,32 +2059,22 @@ createSlider(TeleportCardContent, "Distance Offset", 2, 25, state.teleportDistan
 	state.teleportDistance = val
 end)
 
-type FeatureEntry = {
-	id: string,
-	label: string,
-	description: string,
-	availability: string,
-	category: string,
-	execute: (() -> ())?,
+FeatureRegistry.TeleportTarget = {
+	id = "teleport_target",
+	label = "Teleport to Target",
+	description = "Translates local character CFrame to selected player position with offset.",
+	availability = CONFIG.AVAILABILITY.EXPERIENCE,
+	category = "PlayerTools",
+	execute = executeTeleport,
 }
 
-local FeatureRegistry: { [string]: FeatureEntry } = {
-	TeleportTarget = {
-		id = "teleport_target",
-		label = "Teleport to Target",
-		description = "Translates local character CFrame to selected player position with offset.",
-		availability = CONFIG.AVAILABILITY.EXPERIENCE,
-		category = "PlayerTools",
-		execute = executeTeleport,
-	},
-	ReturnPrevious = {
-		id = "return_previous",
-		label = "Return to Previous Position",
-		description = "Restores character CFrame to coordinates saved prior to teleport.",
-		availability = CONFIG.AVAILABILITY.EXPERIENCE,
-		category = "PlayerTools",
-		execute = executeReturnToPrevious,
-	},
+FeatureRegistry.ReturnPrevious = {
+	id = "return_previous",
+	label = "Return to Previous Position",
+	description = "Restores character CFrame to coordinates saved prior to teleport.",
+	availability = CONFIG.AVAILABILITY.EXPERIENCE,
+	category = "PlayerTools",
+	execute = executeReturnToPrevious,
 }
 
 createActionButton(TeleportCardContent, FeatureRegistry.TeleportTarget.label, FeatureRegistry.TeleportTarget.availability, executeTeleport)
@@ -2126,9 +2136,6 @@ local _, setVisualToggle = createToggle(FollowCardContent, "Local Follow Target"
 	end
 end)
 setFollowVisual = setVisualToggle
-end
-
-local function buildTrollTab(PageTroll: ScrollingFrame)
 end
 
 local function buildTrollTab(PageTroll: ScrollingFrame)
@@ -2467,9 +2474,6 @@ createToggle(SpinCardContent, "Toggle FE Spinbot", CONFIG.AVAILABILITY.COLLISION
 end
 
 local function buildMovementTab(PageMovement: ScrollingFrame)
-end
-
-local function buildMovementTab(PageMovement: ScrollingFrame)
 -- MOVEMENT TAB
 local _, WalkCardContent = createCard(PageMovement, "Walk Speed Adjustment", "Local Humanoid walk speed modification")
 local _, setWalkSlider = createSlider(WalkCardContent, "Walk Speed", 0, 120, state.walkSpeed, 1, "studs/s", function(val)
@@ -2482,14 +2486,18 @@ local _, setWalkSlider = createSlider(WalkCardContent, "Walk Speed", 0, 120, sta
 	end
 end)
 
-local function resetWalkSpeed()
-	state.walkSpeed = state.defaultWalkSpeed
-	setWalkSlider(state.defaultWalkSpeed)
+local function setWalkSpeed(val: number)
+	state.walkSpeed = val
+	setWalkSlider(val)
 	local char = LocalPlayer.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if hum then
-		hum.WalkSpeed = state.defaultWalkSpeed
+		hum.WalkSpeed = val
 	end
+end
+
+local function resetWalkSpeed()
+	setWalkSpeed(state.defaultWalkSpeed)
 	updateStatusBar("WalkSpeed reset to default (16).", "Normal")
 end
 
@@ -2519,16 +2527,20 @@ local _, setJumpSlider = createSlider(JumpCardContent, "Jump Setting", 0, 150, s
 	end
 end)
 
-local function resetJumpParameter()
+local function setJump(val: number)
+	state.jumpPower = val
+	setJumpSlider(val)
 	local char = LocalPlayer.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if hum then
 		hum.UseJumpPower = true
-		hum.JumpPower = state.defaultJumpPower
-		state.jumpPower = state.defaultJumpPower
-		setJumpSlider(state.defaultJumpPower)
+		hum.JumpPower = val
 	end
-	updateStatusBar("Jump parameter reset to default.", "Normal")
+end
+
+local function resetJumpParameter()
+	setJump(state.defaultJumpPower)
+	updateStatusBar("Jump parameter reset to default (50).", "Normal")
 end
 
 FeatureRegistry.ResetJump = {
@@ -2809,7 +2821,7 @@ local function startFlight()
 	updateStatusBar("Flight demonstration active [WASD/Space/Shift].", "Success")
 end
 
-local _, setFlightVisual = createToggle(FlightCardContent, "Toggle Flight", CONFIG.AVAILABILITY.LOCAL, state.isFlying, function(enabled)
+local _flightToggleBtn; _flightToggleBtn, setFlightVisual = createToggle(FlightCardContent, "Toggle Flight", CONFIG.AVAILABILITY.LOCAL, state.isFlying, function(enabled)
 	if enabled then
 		startFlight()
 	else
@@ -2891,9 +2903,6 @@ FeatureRegistry.CharacterReset = {
 	execute = executeCharacterReset,
 }
 createActionButton(ResetCardContent, FeatureRegistry.CharacterReset.label, FeatureRegistry.CharacterReset.availability, executeCharacterReset)
-end
-
-local function buildVisualsTab(PageVisuals: ScrollingFrame)
 end
 
 local function buildVisualsTab(PageVisuals: ScrollingFrame)
@@ -3167,9 +3176,6 @@ createActionButton(EspExtrasCardContent, "Unlock Camera Max Zoom", CONFIG.AVAILA
 end
 
 local function buildExecutorTab(PageExecutor: ScrollingFrame)
-end
-
-local function buildExecutorTab(PageExecutor: ScrollingFrame)
 -- EXECUTOR TAB (LUAU RUNTIME SCRIPT EVALUATOR & SCRIPT HUB)
 local _, ExecEditorCardContent = createCard(PageExecutor, "Luau Script Execution", "Direct in-game script evaluator powered by loadstring()")
 
@@ -3434,9 +3440,6 @@ end
 end
 
 local function buildWorldTab(PageWorld: ScrollingFrame)
-end
-
-local function buildWorldTab(PageWorld: ScrollingFrame)
 -- WORLD & ENVIRONMENT TAB
 local _, GravityCardContent = createCard(PageWorld, "Workspace Gravity Mechanics", "Engine physics gravity acceleration modifier")
 
@@ -3600,9 +3603,6 @@ createActionButton(WorldOptCardContent, "Clear Workspace Loose Debris", CONFIG.A
 end
 
 local function buildUtilityTab(PageUtility: ScrollingFrame)
-end
-
-local function buildUtilityTab(PageUtility: ScrollingFrame)
 -- UTILITY TAB (SERVER, TOOLS & DIAGNOSTICS)
 local _, ServerCardContent = createCard(PageUtility, "Server Session Navigation", "Teleportation and instance management")
 
@@ -3741,9 +3741,6 @@ end))
 end
 
 local function buildSettingsTab(PageSettings: ScrollingFrame)
-end
-
-local function buildSettingsTab(PageSettings: ScrollingFrame)
 -- SETTINGS TAB
 local _, ScaleCardContent = createCard(PageSettings, "Interface Scale", "Adjust viewport scale factor")
 createSlider(ScaleCardContent, "Scale Factor", 0.8, 1.25, state.guiScale, 0.05, "x", function(val)
@@ -3823,9 +3820,6 @@ HotkeyLabel.Parent = HotkeyCardContent
 end
 
 local function buildInfoTab(PageInfo: ScrollingFrame)
-end
-
-local function buildInfoTab(PageInfo: ScrollingFrame)
 -- INFORMATION TAB
 local function createInfoCard(title: string, bodyText: string)
 	local _, content = createCard(PageInfo, title)
@@ -3892,10 +3886,13 @@ sysLabel.Parent = sysDiagContent
 end
 
 local function bindEvents()
-end
-
-local function bindEvents()
 -- SECTION 7: EVENT CONNECTIONS & DRAGGING
+trackConnection(CloseButton.Activated:Connect(function()
+	MainFrame.Visible = false
+	MinimizedPill.Visible = false
+	updateStatusBar("Interface hidden. Tap floating button to reopen.", "Normal")
+end))
+
 trackConnection(MinimizeButton.Activated:Connect(function()
 	state.isMinimized = true
 	MainFrame.Visible = false
@@ -3964,7 +3961,7 @@ trackConnection(LocalPlayer.CharacterAdded:Connect(function(newChar)
 	end
 	if state.isFlying then
 		stopFlight()
-		setFlightVisual(false)
+		if setFlightVisual then setFlightVisual(false) end
 	end
 	if state.isFlinging then
 		abortFling()
@@ -4001,10 +3998,9 @@ trackConnection(RunService.Heartbeat:Connect(function()
 	end
 end))
 end
-end
 
 -- SECTION 8: CLEANUP LIFECYCLE & ERROR HANDLING
-local function cleanupAll()
+cleanupAll = function()
 	state.isFollowing = false
 	abortFling()
 	stopTouchFling()
@@ -4050,16 +4046,20 @@ local function cleanupAll()
 
 	ScreenGui:Destroy()
 	local cleanupG = _G :: any
-	cleanupG.SentinelUtilityCleanup = nil
+	pcall(function()
+		cleanupG.SentinelUtilityCleanup = nil
+	end)
 end
 
-trackConnection(CloseButton.Activated:Connect(function()
-	MainFrame.Visible = false
-	MinimizedPill.Visible = false
-	updateStatusBar("Interface hidden. Tap floating button to reopen.", "Normal")
-end))
 local sharedG = _G :: any
-sharedG.SentinelUtilityCleanup = cleanupAll
+pcall(function()
+	sharedG.SentinelUtilityCleanup = cleanupAll
+end)
+if typeof(shared) == "table" then
+	pcall(function()
+		(shared :: any).SentinelUtilityCleanup = cleanupAll
+	end)
+end
 
 
 -- =========================================================================
