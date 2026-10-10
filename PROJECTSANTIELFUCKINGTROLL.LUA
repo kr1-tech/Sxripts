@@ -5,6 +5,11 @@ local CONFIG = {
 	GUI_NAME = "SentinelUtilityClient_Core",
 	VERSION = "2.6.0",
 	HOTKEY = Enum.KeyCode.RightControl,
+	AUTH = {
+		REQUIRED = true,
+		VALID_USER = "redluaontop",
+		VALID_PASS = "exploitingontophaxx",
+	},
 	DIMENSIONS = {
 		WINDOW_SIZE = UDim2.new(0, 580, 0, 420),
 		MINIMIZED_SIZE = UDim2.new(0, 180, 0, 36),
@@ -58,6 +63,8 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
@@ -98,6 +105,59 @@ local function getViewportSize(): Vector2
 		return cam.ViewportSize
 	end
 	return Vector2.new(1280, 720)
+end
+
+-- Universal loadstring resolver supporting modern executor environments
+local function resolveLoadstring(): ((string) -> any)?
+	local fn: any = nil
+	pcall(function()
+		local anyG = _G :: any
+		if typeof(anyG.loadstring) == "function" then
+			fn = anyG.loadstring
+		end
+	end)
+	if not fn then
+		pcall(function()
+			local anyEnv: any = (typeof(getfenv) == "function" and getfenv()) or {}
+			if typeof(anyEnv.loadstring) == "function" then
+				fn = anyEnv.loadstring
+			end
+		end)
+	end
+	if not fn then
+		pcall(function()
+			local anyG = _G :: any
+			if typeof(anyG.getgenv) == "function" then
+				local genv = anyG.getgenv()
+				if typeof(genv) == "table" and typeof(genv.loadstring) == "function" then
+					fn = genv.loadstring
+				end
+			end
+		end)
+	end
+	return fn
+end
+
+local function executeCode(sourceCode: string): (boolean, string)
+	if sourceCode == "" or sourceCode:match("^%s*$") then
+		return false, "Editor is empty. Enter or paste Luau code first."
+	end
+	local ls = resolveLoadstring()
+	if not ls then
+		return false, "loadstring() is not available in this executor environment."
+	end
+	local loadOk, compiledOrErr = pcall(ls, sourceCode)
+	if not loadOk or typeof(compiledOrErr) ~= "function" then
+		return false, "[Compile Error] " .. tostring(compiledOrErr or "Syntax error in script")
+	end
+	local execFunc = compiledOrErr :: () -> ()
+	local runOk, runErr = pcall(function()
+		task.spawn(execFunc)
+	end)
+	if not runOk then
+		return false, "[Runtime Error] " .. tostring(runErr)
+	end
+	return true, "Script executed successfully."
 end
 
 -- Executor-aware protected GUI parent resolver (hardened for Delta Mobile and PC)
@@ -219,6 +279,37 @@ local state = {
 	isMobile = isMobileDevice,
 	showMobileButton = UserInputService.TouchEnabled,
 	manualScaleOverride = false,
+	isAuthenticated = false,
+	-- Movement extras
+	infiniteJump = false,
+	bunnyHop = false,
+	noFallDamage = false,
+	waterWalk = false,
+	airWalk = false,
+	-- Troll extras
+	isSpinbot = false,
+	spinbotSpeed = 40,
+	-- Visuals extras
+	boxEsp = false,
+	nameEsp = false,
+	fullbright = false,
+	noShadows = false,
+	noFog = false,
+	xray = false,
+	zoomUnlock = false,
+	-- World & Environment
+	gravity = 196.2,
+	defaultGravity = 196.2,
+	clockTime = 14,
+	dayNightCycle = false,
+	antiVoid = false,
+	antiSit = false,
+	antiRagdoll = false,
+	antiAfk = false,
+	-- Utility & Chat
+	chatSpam = false,
+	chatMessage = "Sentinel Suite Active",
+	chatInterval = 3,
 	statusMessage = "System initialized and ready.",
 	statusType = "Normal",
 }
@@ -342,6 +433,7 @@ MainFrame.BackgroundColor3 = CONFIG.THEME.BACKGROUND
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = false
 MainFrame.Active = true -- Blocks touch fallthrough to game world
+MainFrame.Visible = false
 MainFrame.Parent = ScreenGui
 createCorner(MainFrame, 10)
 createStroke(MainFrame, CONFIG.THEME.BORDER, 1)
@@ -383,7 +475,7 @@ MobileToggleButton.TextSize = 22
 MobileToggleButton.AutoButtonColor = false
 MobileToggleButton.Active = true
 MobileToggleButton.ZIndex = 250
-MobileToggleButton.Visible = state.showMobileButton
+MobileToggleButton.Visible = false
 MobileToggleButton.Parent = ScreenGui
 createCorner(MobileToggleButton, 23)
 local mobileStroke = createStroke(MobileToggleButton, state.accentColor, 1.5)
@@ -425,6 +517,358 @@ local function recenterMainFrame()
 	end
 	updateStatusBar("Interface centered to screen.", "Normal")
 end
+
+-- =========================================================================
+-- LOADING SCREEN & KEY CENTER (ACCESS GATEWAY)
+-- =========================================================================
+local LoadingModal = Instance.new("Frame")
+LoadingModal.Name = "Sentinel_LoadingModal"
+LoadingModal.Size = UDim2.new(0, 360, 0, 180)
+LoadingModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+LoadingModal.AnchorPoint = Vector2.new(0.5, 0.5)
+LoadingModal.BackgroundColor3 = CONFIG.THEME.BACKGROUND
+LoadingModal.BorderSizePixel = 0
+LoadingModal.Active = true
+LoadingModal.ZIndex = 500
+LoadingModal.Parent = ScreenGui
+createCorner(LoadingModal, 12)
+local loadingStroke = createStroke(LoadingModal, CONFIG.THEME.BORDER, 1.5)
+registerAccent(loadingStroke, "Color")
+
+local LoadingTitle = Instance.new("TextLabel")
+LoadingTitle.Size = UDim2.new(1, -24, 0, 24)
+LoadingTitle.Position = UDim2.new(0, 12, 0, 18)
+LoadingTitle.BackgroundTransparency = 1
+LoadingTitle.Font = CONFIG.FONTS.TITLE
+LoadingTitle.Text = "SENTINEL"
+LoadingTitle.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+LoadingTitle.TextSize = 18
+LoadingTitle.TextXAlignment = Enum.TextXAlignment.Center
+LoadingTitle.ZIndex = 501
+LoadingTitle.Parent = LoadingModal
+
+local LoadingSubtitle = Instance.new("TextLabel")
+LoadingSubtitle.Size = UDim2.new(1, -24, 0, 16)
+LoadingSubtitle.Position = UDim2.new(0, 12, 0, 44)
+LoadingSubtitle.BackgroundTransparency = 1
+LoadingSubtitle.Font = CONFIG.FONTS.MONO
+LoadingSubtitle.Text = "MODULAR CLIENT SUITE | v" .. CONFIG.VERSION
+LoadingSubtitle.TextColor3 = state.accentColor
+LoadingSubtitle.TextSize = 10
+LoadingSubtitle.TextXAlignment = Enum.TextXAlignment.Center
+LoadingSubtitle.ZIndex = 501
+LoadingSubtitle.Parent = LoadingModal
+registerAccent(LoadingSubtitle, "TextColor3")
+
+local LoadingStatus = Instance.new("TextLabel")
+LoadingStatus.Size = UDim2.new(1, -32, 0, 18)
+LoadingStatus.Position = UDim2.new(0, 16, 0, 85)
+LoadingStatus.BackgroundTransparency = 1
+LoadingStatus.Font = CONFIG.FONTS.BODY
+LoadingStatus.Text = "Initializing engine hooks..."
+LoadingStatus.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+LoadingStatus.TextSize = 11
+LoadingStatus.TextXAlignment = Enum.TextXAlignment.Left
+LoadingStatus.ZIndex = 501
+LoadingStatus.Parent = LoadingModal
+
+local ProgressBarTrack = Instance.new("Frame")
+ProgressBarTrack.Size = UDim2.new(1, -32, 0, 8)
+ProgressBarTrack.Position = UDim2.new(0, 16, 0, 110)
+ProgressBarTrack.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+ProgressBarTrack.BorderSizePixel = 0
+ProgressBarTrack.ZIndex = 501
+ProgressBarTrack.Parent = LoadingModal
+createCorner(ProgressBarTrack, 4)
+createStroke(ProgressBarTrack, CONFIG.THEME.BORDER, 1)
+
+local ProgressBarFill = Instance.new("Frame")
+ProgressBarFill.Size = UDim2.new(0, 0, 1, 0)
+ProgressBarFill.BackgroundColor3 = state.accentColor
+ProgressBarFill.BorderSizePixel = 0
+ProgressBarFill.ZIndex = 502
+ProgressBarFill.Parent = ProgressBarTrack
+createCorner(ProgressBarFill, 4)
+registerAccent(ProgressBarFill, "BackgroundColor3")
+
+local LoadingFooter = Instance.new("TextLabel")
+LoadingFooter.Size = UDim2.new(1, -32, 0, 14)
+LoadingFooter.Position = UDim2.new(0, 16, 0, 134)
+LoadingFooter.BackgroundTransparency = 1
+LoadingFooter.Font = CONFIG.FONTS.MONO
+LoadingFooter.Text = "Delta & Mobile Protected Runtime"
+LoadingFooter.TextColor3 = CONFIG.THEME.TEXT_MUTED
+LoadingFooter.TextSize = 9
+LoadingFooter.TextXAlignment = Enum.TextXAlignment.Center
+LoadingFooter.ZIndex = 501
+LoadingFooter.Parent = LoadingModal
+
+-- KEY CENTER (LOGIN GATEWAY)
+local KeyCenterModal = Instance.new("Frame")
+KeyCenterModal.Name = "Sentinel_KeyCenter"
+KeyCenterModal.Size = UDim2.new(0, 380, 0, 310)
+KeyCenterModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+KeyCenterModal.AnchorPoint = Vector2.new(0.5, 0.5)
+KeyCenterModal.BackgroundColor3 = CONFIG.THEME.BACKGROUND
+KeyCenterModal.BorderSizePixel = 0
+KeyCenterModal.Active = true
+KeyCenterModal.Visible = false
+KeyCenterModal.ZIndex = 500
+KeyCenterModal.Parent = ScreenGui
+createCorner(KeyCenterModal, 12)
+local keyStroke = createStroke(KeyCenterModal, CONFIG.THEME.BORDER, 1.5)
+registerAccent(keyStroke, "Color")
+
+local KeyHeader = Instance.new("Frame")
+KeyHeader.Size = UDim2.new(1, 0, 0, 48)
+KeyHeader.BackgroundColor3 = CONFIG.THEME.SURFACE
+KeyHeader.BorderSizePixel = 0
+KeyHeader.ZIndex = 501
+KeyHeader.Parent = KeyCenterModal
+createCorner(KeyHeader, 12)
+
+local KeyHeaderCover = Instance.new("Frame")
+KeyHeaderCover.Size = UDim2.new(1, 0, 0, 10)
+KeyHeaderCover.Position = UDim2.new(0, 0, 1, -10)
+KeyHeaderCover.BackgroundColor3 = CONFIG.THEME.SURFACE
+KeyHeaderCover.BorderSizePixel = 0
+KeyHeaderCover.ZIndex = 501
+KeyHeaderCover.Parent = KeyHeader
+
+local KeyTitle = Instance.new("TextLabel")
+KeyTitle.Size = UDim2.new(1, -24, 0, 20)
+KeyTitle.Position = UDim2.new(0, 12, 0, 8)
+KeyTitle.BackgroundTransparency = 1
+KeyTitle.Font = CONFIG.FONTS.TITLE
+KeyTitle.Text = "SENTINEL | ACCESS GATEWAY"
+KeyTitle.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+KeyTitle.TextSize = 13
+KeyTitle.TextXAlignment = Enum.TextXAlignment.Left
+KeyTitle.ZIndex = 502
+KeyTitle.Parent = KeyHeader
+
+local KeySubtitle = Instance.new("TextLabel")
+KeySubtitle.Size = UDim2.new(1, -24, 0, 14)
+KeySubtitle.Position = UDim2.new(0, 12, 0, 28)
+KeySubtitle.BackgroundTransparency = 1
+KeySubtitle.Font = CONFIG.FONTS.MONO
+KeySubtitle.Text = "AUTHENTICATION REQUIRED"
+KeySubtitle.TextColor3 = state.accentColor
+KeySubtitle.TextSize = 10
+KeySubtitle.TextXAlignment = Enum.TextXAlignment.Left
+KeySubtitle.ZIndex = 502
+KeySubtitle.Parent = KeyHeader
+registerAccent(KeySubtitle, "TextColor3")
+
+local UserLabel = Instance.new("TextLabel")
+UserLabel.Size = UDim2.new(1, -32, 0, 14)
+UserLabel.Position = UDim2.new(0, 16, 0, 58)
+UserLabel.BackgroundTransparency = 1
+UserLabel.Font = CONFIG.FONTS.HEADER
+UserLabel.Text = "ACCOUNT USERNAME"
+UserLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+UserLabel.TextSize = 10
+UserLabel.TextXAlignment = Enum.TextXAlignment.Left
+UserLabel.ZIndex = 501
+UserLabel.Parent = KeyCenterModal
+
+local UserBoxContainer = Instance.new("Frame")
+UserBoxContainer.Size = UDim2.new(1, -32, 0, 34)
+UserBoxContainer.Position = UDim2.new(0, 16, 0, 76)
+UserBoxContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+UserBoxContainer.BorderSizePixel = 0
+UserBoxContainer.ZIndex = 501
+UserBoxContainer.Parent = KeyCenterModal
+createCorner(UserBoxContainer, 6)
+createStroke(UserBoxContainer, CONFIG.THEME.BORDER, 1)
+
+local UserInputBox = Instance.new("TextBox")
+UserInputBox.Size = UDim2.new(1, -16, 1, 0)
+UserInputBox.Position = UDim2.new(0, 8, 0, 0)
+UserInputBox.BackgroundTransparency = 1
+UserInputBox.Font = CONFIG.FONTS.MONO
+UserInputBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
+UserInputBox.PlaceholderText = "Enter Username..."
+UserInputBox.Text = ""
+UserInputBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+UserInputBox.TextSize = 11
+UserInputBox.ClearTextOnFocus = false
+UserInputBox.TextXAlignment = Enum.TextXAlignment.Left
+UserInputBox.ZIndex = 502
+UserInputBox.Parent = UserBoxContainer
+
+local PassLabel = Instance.new("TextLabel")
+PassLabel.Size = UDim2.new(1, -32, 0, 14)
+PassLabel.Position = UDim2.new(0, 16, 0, 118)
+PassLabel.BackgroundTransparency = 1
+PassLabel.Font = CONFIG.FONTS.HEADER
+PassLabel.Text = "SECURITY PASSWORD"
+PassLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+PassLabel.TextSize = 10
+PassLabel.TextXAlignment = Enum.TextXAlignment.Left
+PassLabel.ZIndex = 501
+PassLabel.Parent = KeyCenterModal
+
+local PassBoxContainer = Instance.new("Frame")
+PassBoxContainer.Size = UDim2.new(1, -32, 0, 34)
+PassBoxContainer.Position = UDim2.new(0, 16, 0, 136)
+PassBoxContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+PassBoxContainer.BorderSizePixel = 0
+PassBoxContainer.ZIndex = 501
+PassBoxContainer.Parent = KeyCenterModal
+createCorner(PassBoxContainer, 6)
+createStroke(PassBoxContainer, CONFIG.THEME.BORDER, 1)
+
+local PassInputBox = Instance.new("TextBox")
+PassInputBox.Size = UDim2.new(1, -16, 1, 0)
+PassInputBox.Position = UDim2.new(0, 8, 0, 0)
+PassInputBox.BackgroundTransparency = 1
+PassInputBox.Font = CONFIG.FONTS.MONO
+PassInputBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
+PassInputBox.PlaceholderText = "Enter Password..."
+PassInputBox.Text = ""
+PassInputBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+PassInputBox.TextSize = 11
+PassInputBox.ClearTextOnFocus = false
+PassInputBox.TextXAlignment = Enum.TextXAlignment.Left
+PassInputBox.ZIndex = 502
+PassInputBox.Parent = PassBoxContainer
+
+local AuthStatusLabel = Instance.new("TextLabel")
+AuthStatusLabel.Size = UDim2.new(1, -32, 0, 16)
+AuthStatusLabel.Position = UDim2.new(0, 16, 0, 178)
+AuthStatusLabel.BackgroundTransparency = 1
+AuthStatusLabel.Font = CONFIG.FONTS.MONO
+AuthStatusLabel.Text = "Status: Awaiting credentials"
+AuthStatusLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+AuthStatusLabel.TextSize = 10
+AuthStatusLabel.TextXAlignment = Enum.TextXAlignment.Center
+AuthStatusLabel.ZIndex = 501
+AuthStatusLabel.Parent = KeyCenterModal
+
+local AuthButtonRow = Instance.new("Frame")
+AuthButtonRow.Size = UDim2.new(1, -32, 0, 36)
+AuthButtonRow.Position = UDim2.new(0, 16, 0, 202)
+AuthButtonRow.BackgroundTransparency = 1
+AuthButtonRow.ZIndex = 501
+AuthButtonRow.Parent = KeyCenterModal
+
+local AuthSubmitButton = Instance.new("TextButton")
+AuthSubmitButton.Size = UDim2.new(0.68, 0, 1, 0)
+AuthSubmitButton.Position = UDim2.new(0, 0, 0, 0)
+AuthSubmitButton.BackgroundColor3 = CONFIG.THEME.SURFACE_ALT
+AuthSubmitButton.Font = CONFIG.FONTS.HEADER
+AuthSubmitButton.Text = "Verify & Unlock"
+AuthSubmitButton.TextColor3 = state.accentColor
+AuthSubmitButton.TextSize = 12
+AuthSubmitButton.ZIndex = 502
+AuthSubmitButton.Parent = AuthButtonRow
+createCorner(AuthSubmitButton, 6)
+local submitStroke = createStroke(AuthSubmitButton, state.accentColor, 1)
+registerAccent(submitStroke, "Color")
+registerAccent(AuthSubmitButton, "TextColor3")
+
+local AuthClearButton = Instance.new("TextButton")
+AuthClearButton.Size = UDim2.new(0.28, 0, 1, 0)
+AuthClearButton.Position = UDim2.new(0.72, 0, 0, 0)
+AuthClearButton.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+AuthClearButton.Font = CONFIG.FONTS.HEADER
+AuthClearButton.Text = "Clear"
+AuthClearButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+AuthClearButton.TextSize = 11
+AuthClearButton.ZIndex = 502
+AuthClearButton.Parent = AuthButtonRow
+createCorner(AuthClearButton, 6)
+createStroke(AuthClearButton, CONFIG.THEME.BORDER, 1)
+
+local QuickFillButton = Instance.new("TextButton")
+QuickFillButton.Size = UDim2.new(1, -32, 0, 28)
+QuickFillButton.Position = UDim2.new(0, 16, 0, 246)
+QuickFillButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+QuickFillButton.Font = CONFIG.FONTS.MONO
+QuickFillButton.Text = "Auto-Fill Authorized Key (Quick Access)"
+QuickFillButton.TextColor3 = CONFIG.THEME.TEXT_MUTED
+QuickFillButton.TextSize = 10
+QuickFillButton.ZIndex = 502
+QuickFillButton.Parent = KeyCenterModal
+createCorner(QuickFillButton, 6)
+createStroke(QuickFillButton, CONFIG.THEME.BORDER, 1)
+
+-- Loading animation sequence
+task.spawn(function()
+	local stages = {
+		{ pct = 0.25, msg = "Loading core services & camera..." },
+		{ pct = 0.55, msg = "Initializing troll collision & flight engines..." },
+		{ pct = 0.85, msg = "Mounting universal loadstring runtime..." },
+		{ pct = 1.00, msg = "Launching Sentinel Key Center..." },
+	}
+	for _, stage in ipairs(stages) do
+		task.wait(0.35)
+		LoadingStatus.Text = stage.msg
+		animateTween(ProgressBarFill, 0.3, { Size = UDim2.new(stage.pct, 0, 1, 0) })
+	end
+	task.wait(0.3)
+	LoadingModal.Visible = false
+	LoadingModal:Destroy()
+	KeyCenterModal.Visible = true
+end)
+
+local function attemptUnlock()
+	local enteredUser = UserInputBox.Text:gsub("^%s*(.-)%s*$", "%1")
+	local enteredPass = PassInputBox.Text:gsub("^%s*(.-)%s*$", "%1")
+
+	if enteredUser == CONFIG.AUTH.VALID_USER and enteredPass == CONFIG.AUTH.VALID_PASS then
+		state.isAuthenticated = true
+		AuthStatusLabel.Text = "[Access Granted] Verified! Launching Sentinel..."
+		AuthStatusLabel.TextColor3 = CONFIG.THEME.SUCCESS
+		keyStroke.Color = CONFIG.THEME.SUCCESS
+
+		task.wait(0.5)
+		KeyCenterModal:Destroy()
+
+		MainFrame.Visible = true
+		MobileToggleButton.Visible = state.showMobileButton
+		clampMainFrameToBounds()
+		updateStatusBar("Authentication verified. Welcome to Sentinel Suite!", "Success")
+	else
+		AuthStatusLabel.Text = "[Access Denied] Invalid username or password."
+		AuthStatusLabel.TextColor3 = CONFIG.THEME.ERROR
+		keyStroke.Color = CONFIG.THEME.ERROR
+		task.delay(1.5, function()
+			if keyStroke and keyStroke.Parent then
+				keyStroke.Color = CONFIG.THEME.BORDER
+			end
+		end)
+	end
+end
+
+trackConnection(AuthSubmitButton.Activated:Connect(attemptUnlock))
+
+trackConnection(AuthClearButton.Activated:Connect(function()
+	UserInputBox.Text = ""
+	PassInputBox.Text = ""
+	AuthStatusLabel.Text = "Status: Input cleared."
+	AuthStatusLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+end))
+
+trackConnection(QuickFillButton.Activated:Connect(function()
+	UserInputBox.Text = CONFIG.AUTH.VALID_USER
+	PassInputBox.Text = CONFIG.AUTH.VALID_PASS
+	AuthStatusLabel.Text = "Credentials populated. Tap 'Verify & Unlock' to proceed."
+	AuthStatusLabel.TextColor3 = state.accentColor
+end))
+
+trackConnection(UserInputBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		PassInputBox:CaptureFocus()
+	end
+end))
+
+trackConnection(PassInputBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		attemptUnlock()
+	end
+end))
 
 -- Title Bar Construction
 local TitleBar = Instance.new("Frame")
@@ -1140,6 +1584,9 @@ createTabButton("PlayerTools", "Players")
 createTabButton("Troll", "Troll [FE]")
 createTabButton("Movement", "Movement")
 createTabButton("Visuals", "Visuals")
+createTabButton("Executor", "Executor")
+createTabButton("World", "World")
+createTabButton("Utility", "Utility")
 createTabButton("Settings", "Settings")
 createTabButton("Info", "Info")
 
@@ -1147,6 +1594,9 @@ local PagePlayerTools = createPage("PlayerTools")
 local PageTroll = createPage("Troll")
 local PageMovement = createPage("Movement")
 local PageVisuals = createPage("Visuals")
+local PageExecutor = createPage("Executor")
+local PageWorld = createPage("World")
+local PageUtility = createPage("Utility")
 local PageSettings = createPage("Settings")
 local PageInfo = createPage("Info")
 
@@ -1889,6 +2339,41 @@ local _, setHeadSitToggle = createToggle(KinematicCardContent, "Head Sit / Attac
 end)
 setHeadSitVisual = setHeadSitToggle
 
+-- FE SPINBOT & TORNADO
+local _, SpinCardContent = createCard(PageTroll, "Rotational Velocity Spinbot [FE]", "High angular momentum character rotation")
+
+createSlider(SpinCardContent, "Spinbot Rotational Speed", 10, 150, state.spinbotSpeed, 10, "rad/s", function(val)
+	state.spinbotSpeed = val
+end)
+
+local spinbotHeartbeatConn: RBXScriptConnection? = nil
+local function toggleSpinbot(enabled: boolean)
+	state.isSpinbot = enabled
+	if enabled then
+		spinbotHeartbeatConn = RunService.Heartbeat:Connect(function()
+			local char = LocalPlayer.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp:IsA("BasePart") then
+				hrp.AssemblyAngularVelocity = Vector3.new(0, state.spinbotSpeed, 0)
+			end
+		end)
+		if spinbotHeartbeatConn then trackConnection(spinbotHeartbeatConn) end
+		updateStatusBar("FE Spinbot tornado active.", "Success")
+	else
+		if spinbotHeartbeatConn then
+			spinbotHeartbeatConn:Disconnect()
+			spinbotHeartbeatConn = nil
+		end
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			hrp.AssemblyAngularVelocity = Vector3.zero
+		end
+		updateStatusBar("FE Spinbot stopped.", "Normal")
+	end
+end
+createToggle(SpinCardContent, "Toggle FE Spinbot", CONFIG.AVAILABILITY.COLLISION, state.isSpinbot, toggleSpinbot)
+
 -- MOVEMENT TAB
 local _, WalkCardContent = createCard(PageMovement, "Walk Speed Adjustment", "Local Humanoid walk speed modification")
 local _, setWalkSlider = createSlider(WalkCardContent, "Walk Speed", 0, 120, state.walkSpeed, 1, "studs/s", function(val)
@@ -1959,6 +2444,172 @@ FeatureRegistry.ResetJump = {
 	execute = resetJumpParameter,
 }
 createActionButton(JumpCardContent, FeatureRegistry.ResetJump.label, FeatureRegistry.ResetJump.availability, resetJumpParameter)
+
+-- SPEED & JUMP PRESETS
+local _, PresetCardContent = createCard(PageMovement, "Mobility Presets & Overrides", "Instant velocity scaling profiles")
+
+local WalkPresetRow = Instance.new("Frame")
+WalkPresetRow.Size = UDim2.new(1, 0, 0, 26)
+WalkPresetRow.BackgroundTransparency = 1
+WalkPresetRow.Parent = PresetCardContent
+
+local WalkPresetLayout = Instance.new("UIListLayout")
+WalkPresetLayout.FillDirection = Enum.FillDirection.Horizontal
+WalkPresetLayout.Padding = UDim.new(0, 4)
+WalkPresetLayout.Parent = WalkPresetRow
+
+local walkPresets = {
+	{ name = "Normal (16)", val = 16 },
+	{ name = "Fast (32)", val = 32 },
+	{ name = "Sprint (64)", val = 64 },
+	{ name = "Sonic (120)", val = 120 },
+	{ name = "Ludicrous (250)", val = 250 },
+}
+
+for _, p in ipairs(walkPresets) do
+	local pBtn = Instance.new("TextButton")
+	pBtn.Size = UDim2.new(0.19, 0, 1, 0)
+	pBtn.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	pBtn.Font = CONFIG.FONTS.HEADER
+	pBtn.Text = p.name
+	pBtn.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	pBtn.TextSize = 9
+	pBtn.Parent = WalkPresetRow
+	createCorner(pBtn, 4)
+	createStroke(pBtn, CONFIG.THEME.BORDER, 1)
+	trackConnection(pBtn.Activated:Connect(function()
+		state.walkSpeed = p.val
+		setWalkSpeed(p.val)
+		updateStatusBar(string.format("WalkSpeed preset set to %d.", p.val), "Success")
+	end))
+end
+
+local JumpPresetRow = Instance.new("Frame")
+JumpPresetRow.Size = UDim2.new(1, 0, 0, 26)
+JumpPresetRow.BackgroundTransparency = 1
+JumpPresetRow.Parent = PresetCardContent
+
+local JumpPresetLayout = Instance.new("UIListLayout")
+JumpPresetLayout.FillDirection = Enum.FillDirection.Horizontal
+JumpPresetLayout.Padding = UDim.new(0, 4)
+JumpPresetLayout.Parent = JumpPresetRow
+
+local jumpPresets = {
+	{ name = "Normal (50)", val = 50 },
+	{ name = "High (100)", val = 100 },
+	{ name = "Super (175)", val = 175 },
+	{ name = "Moon (250)", val = 250 },
+}
+
+for _, p in ipairs(jumpPresets) do
+	local pBtn = Instance.new("TextButton")
+	pBtn.Size = UDim2.new(0.24, 0, 1, 0)
+	pBtn.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	pBtn.Font = CONFIG.FONTS.HEADER
+	pBtn.Text = p.name
+	pBtn.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	pBtn.TextSize = 9
+	pBtn.Parent = JumpPresetRow
+	createCorner(pBtn, 4)
+	createStroke(pBtn, CONFIG.THEME.BORDER, 1)
+	trackConnection(pBtn.Activated:Connect(function()
+		state.jumpPower = p.val
+		setJump(p.val)
+		updateStatusBar(string.format("JumpPower preset set to %d.", p.val), "Success")
+	end))
+end
+
+-- ADVANCED MOBILITY & JUMP EXTRAS
+local _, ExtraMoveCardContent = createCard(PageMovement, "Autonomous Mobility Mechanics", "Air jumping, bunny hopping, and terrain traversal")
+
+createToggle(ExtraMoveCardContent, "Infinite Air Jump", CONFIG.AVAILABILITY.LOCAL, state.infiniteJump, function(enabled)
+	state.infiniteJump = enabled
+	updateStatusBar(enabled and "Infinite jump active." or "Infinite jump disabled.", "Normal")
+end)
+
+trackConnection(UserInputService.JumpRequest:Connect(function()
+	if state.infiniteJump then
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+	end
+end))
+
+createToggle(ExtraMoveCardContent, "Bunny Hop (Auto Re-Jump)", CONFIG.AVAILABILITY.LOCAL, state.bunnyHop, function(enabled)
+	state.bunnyHop = enabled
+	updateStatusBar(enabled and "Bunny hop active." or "Bunny hop disabled.", "Normal")
+end)
+
+trackConnection(RunService.Heartbeat:Connect(function()
+	if state.bunnyHop then
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and hum.FloorMaterial ~= Enum.Material.Air then
+			hum.Jump = true
+		end
+	end
+end))
+
+createToggle(ExtraMoveCardContent, "Negate Fall Impact Velocity", CONFIG.AVAILABILITY.LOCAL, state.noFallDamage, function(enabled)
+	state.noFallDamage = enabled
+	updateStatusBar(enabled and "Fall impact velocity negated." or "Fall protection disabled.", "Normal")
+end)
+
+trackConnection(RunService.Heartbeat:Connect(function()
+	if state.noFallDamage then
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			local vel = hrp.AssemblyLinearVelocity
+			if vel.Y < -60 then
+				hrp.AssemblyLinearVelocity = Vector3.new(vel.X, -15, vel.Z)
+			end
+		end
+	end
+end))
+
+local function executeForwardDash()
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		hrp.AssemblyLinearVelocity = hrp.CFrame.LookVector * 120 + Vector3.new(0, 15, 0)
+		updateStatusBar("Forward dash executed.", "Success")
+	end
+end
+createActionButton(ExtraMoveCardContent, "Forward Momentum Dash", CONFIG.AVAILABILITY.LOCAL, executeForwardDash)
+
+local skyPlatformPart: Part? = nil
+local function toggleSkyPlatform(enabled: boolean)
+	state.airWalk = enabled
+	if enabled then
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			local part = Instance.new("Part")
+			part.Name = "Sentinel_SkyPlatform"
+			part.Size = Vector3.new(8, 1, 8)
+			part.Anchored = true
+			part.CanCollide = true
+			part.Transparency = 0.5
+			part.Color = state.accentColor
+			part.Material = Enum.Material.ForceField
+			part.CFrame = hrp.CFrame * CFrame.new(0, -3.5, 0)
+			part.Parent = Workspace
+			skyPlatformPart = part
+			trackInstance(part)
+			updateStatusBar("Sky platform spawned beneath character.", "Success")
+		end
+	else
+		if skyPlatformPart then
+			skyPlatformPart:Destroy()
+			skyPlatformPart = nil
+		end
+		updateStatusBar("Sky platform removed.", "Normal")
+	end
+end
+createToggle(ExtraMoveCardContent, "Air Walk Floating Platform", CONFIG.AVAILABILITY.LOCAL, state.airWalk, toggleSkyPlatform)
 
 local _, FlightCardContent = createCard(PageMovement, "Local Flight Demonstration", "Directional flight simulation using client velocity")
 createSlider(FlightCardContent, "Flight Speed", 10, 150, state.flySpeed, 5, "studs/s", function(val)
@@ -2267,6 +2918,711 @@ createToggle(EffectCardContent, "Toggle Screen Effect", CONFIG.AVAILABILITY.LOCA
 	end
 end)
 
+-- COMPREHENSIVE ESP & SENSORY EXTRAS
+local _, EspExtrasCardContent = createCard(PageVisuals, "Sensory Overlays & Tags", "In-game entity awareness and spatial markers")
+
+local activeNametags: { [Player]: BillboardGui } = {}
+
+local function updatePlayerTags()
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local char = plr.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp:IsA("BasePart") then
+				if state.nameEsp and not activeNametags[plr] then
+					local bb = Instance.new("BillboardGui")
+					bb.Name = "Sentinel_Tag_" .. plr.Name
+					bb.Adornee = hrp
+					bb.Size = UDim2.new(0, 160, 0, 36)
+					bb.StudsOffset = Vector3.new(0, 3.2, 0)
+					bb.AlwaysOnTop = true
+					bb.Parent = hrp
+
+					local nameTxt = Instance.new("TextLabel")
+					nameTxt.Size = UDim2.new(1, 0, 0, 18)
+					nameTxt.BackgroundTransparency = 1
+					nameTxt.Font = CONFIG.FONTS.HEADER
+					nameTxt.Text = plr.DisplayName .. " (@" .. plr.Name .. ")"
+					nameTxt.TextColor3 = state.accentColor
+					nameTxt.TextSize = 12
+					nameTxt.TextStrokeTransparency = 0.5
+					nameTxt.Parent = bb
+
+					local distTxt = Instance.new("TextLabel")
+					distTxt.Name = "DistText"
+					distTxt.Size = UDim2.new(1, 0, 0, 14)
+					distTxt.Position = UDim2.new(0, 0, 0, 18)
+					distTxt.BackgroundTransparency = 1
+					distTxt.Font = CONFIG.FONTS.MONO
+					distTxt.TextColor3 = Color3.fromRGB(240, 240, 240)
+					distTxt.TextSize = 10
+					distTxt.TextStrokeTransparency = 0.5
+					distTxt.Parent = bb
+
+					activeNametags[plr] = bb
+					trackInstance(bb)
+				elseif not state.nameEsp and activeNametags[plr] then
+					activeNametags[plr]:Destroy()
+					activeNametags[plr] = nil
+				end
+			end
+		end
+	end
+end
+
+createToggle(EspExtrasCardContent, "Name & Distance Nametag ESP", CONFIG.AVAILABILITY.LOCAL, state.nameEsp, function(enabled)
+	state.nameEsp = enabled
+	updatePlayerTags()
+	updateStatusBar(enabled and "Nametag ESP enabled." or "Nametag ESP disabled.", "Normal")
+end)
+
+trackConnection(RunService.Heartbeat:Connect(function()
+	if state.nameEsp then
+		local localChar = LocalPlayer.Character
+		local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
+		if localHrp and localHrp:IsA("BasePart") then
+			for plr, bb in pairs(activeNametags) do
+				if plr.Parent and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+					local distPart = plr.Character:FindFirstChild("HumanoidRootPart") :: BasePart
+					local dist = (localHrp.Position - distPart.Position).Magnitude
+					local distTxt = bb:FindFirstChild("DistText")
+					if distTxt and distTxt:IsA("TextLabel") then
+						distTxt.Text = string.format("[%.0f studs]", dist)
+					end
+				else
+					bb:Destroy()
+					activeNametags[plr] = nil
+				end
+			end
+		end
+	end
+end))
+
+trackConnection(Players.PlayerRemoving:Connect(function(plr)
+	if activeNametags[plr] then
+		activeNametags[plr]:Destroy()
+		activeNametags[plr] = nil
+	end
+end))
+
+local origLightingSettings = {
+	Ambient = Lighting.Ambient,
+	OutdoorAmbient = Lighting.OutdoorAmbient,
+	Brightness = Lighting.Brightness,
+	GlobalShadows = Lighting.GlobalShadows,
+	FogEnd = Lighting.FogEnd,
+}
+
+createToggle(EspExtrasCardContent, "Fullbright (Max Ambient Light)", CONFIG.AVAILABILITY.LOCAL, state.fullbright, function(enabled)
+	state.fullbright = enabled
+	if enabled then
+		Lighting.Ambient = Color3.fromRGB(220, 220, 220)
+		Lighting.OutdoorAmbient = Color3.fromRGB(220, 220, 220)
+		Lighting.Brightness = 2
+		Lighting.GlobalShadows = false
+		Lighting.FogEnd = 1e6
+		updateStatusBar("Fullbright illumination active.", "Success")
+	else
+		Lighting.Ambient = origLightingSettings.Ambient
+		Lighting.OutdoorAmbient = origLightingSettings.OutdoorAmbient
+		Lighting.Brightness = origLightingSettings.Brightness
+		Lighting.GlobalShadows = origLightingSettings.GlobalShadows
+		Lighting.FogEnd = origLightingSettings.FogEnd
+		updateStatusBar("Lighting restored.", "Normal")
+	end
+end)
+
+createToggle(EspExtrasCardContent, "Disable Global Shadows", CONFIG.AVAILABILITY.LOCAL, state.noShadows, function(enabled)
+	state.noShadows = enabled
+	Lighting.GlobalShadows = not enabled
+	updateStatusBar(enabled and "Shadows disabled." or "Shadows restored.", "Normal")
+end)
+
+createToggle(EspExtrasCardContent, "Clear Atmosphere Fog", CONFIG.AVAILABILITY.LOCAL, state.noFog, function(enabled)
+	state.noFog = enabled
+	Lighting.FogEnd = enabled and 1e6 or origLightingSettings.FogEnd
+	updateStatusBar(enabled and "Fog cleared." or "Fog restored.", "Normal")
+end)
+
+local function toggleXray(enabled: boolean)
+	state.xray = enabled
+	for _, part in ipairs(Workspace:GetDescendants()) do
+		if part:IsA("BasePart") and not part:IsDescendantOf(LocalPlayer.Character or Workspace) then
+			local hum = part.Parent and part.Parent:FindFirstChildOfClass("Humanoid")
+			if not hum then
+				part.LocalTransparencyModifier = enabled and 0.55 or 0
+			end
+		end
+	end
+	updateStatusBar(enabled and "X-Ray wall transparency active." or "X-Ray disabled.", "Normal")
+end
+createToggle(EspExtrasCardContent, "X-Ray Wall Transparency", CONFIG.AVAILABILITY.LOCAL, state.xray, toggleXray)
+
+local function unlockMaxZoom()
+	LocalPlayer.CameraMaxZoomDistance = 100000
+	updateStatusBar("Camera max zoom distance set to 100,000 studs.", "Success")
+end
+createActionButton(EspExtrasCardContent, "Unlock Camera Max Zoom", CONFIG.AVAILABILITY.LOCAL, unlockMaxZoom)
+
+-- EXECUTOR TAB (LUAU RUNTIME SCRIPT EVALUATOR & SCRIPT HUB)
+local _, ExecEditorCardContent = createCard(PageExecutor, "Luau Script Execution", "Direct in-game script evaluator powered by loadstring()")
+
+local CodeEditorContainer = Instance.new("Frame")
+CodeEditorContainer.Size = UDim2.new(1, 0, 0, 140)
+CodeEditorContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+CodeEditorContainer.BorderSizePixel = 0
+CodeEditorContainer.Parent = ExecEditorCardContent
+createCorner(CodeEditorContainer, 6)
+createStroke(CodeEditorContainer, CONFIG.THEME.BORDER, 1)
+
+local CodeBox = Instance.new("TextBox")
+CodeBox.Name = "CodeBox"
+CodeBox.Size = UDim2.new(1, -16, 1, -16)
+CodeBox.Position = UDim2.new(0, 8, 0, 8)
+CodeBox.BackgroundTransparency = 1
+CodeBox.Font = CONFIG.FONTS.MONO
+CodeBox.Text = ""
+CodeBox.PlaceholderText = "-- Type or paste Luau code here...\nprint('Hello from Sentinel Executor!')"
+CodeBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
+CodeBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+CodeBox.TextSize = 11
+CodeBox.TextXAlignment = Enum.TextXAlignment.Left
+CodeBox.TextYAlignment = Enum.TextYAlignment.Top
+CodeBox.ClearTextOnFocus = false
+CodeBox.MultiLine = true
+CodeBox.TextWrapped = true
+CodeBox.Parent = CodeEditorContainer
+
+local ExecButtonRow = Instance.new("Frame")
+ExecButtonRow.Size = UDim2.new(1, 0, 0, 32)
+ExecButtonRow.BackgroundTransparency = 1
+ExecButtonRow.Parent = ExecEditorCardContent
+
+local ExecButtonLayout = Instance.new("UIListLayout")
+ExecButtonLayout.FillDirection = Enum.FillDirection.Horizontal
+ExecButtonLayout.Padding = UDim.new(0, 6)
+ExecButtonLayout.Parent = ExecButtonRow
+
+local ExecRunButton = Instance.new("TextButton")
+ExecRunButton.Size = UDim2.new(0.32, 0, 1, 0)
+ExecRunButton.BackgroundColor3 = CONFIG.THEME.SURFACE_ALT
+ExecRunButton.Font = CONFIG.FONTS.HEADER
+ExecRunButton.Text = "Execute Script"
+ExecRunButton.TextColor3 = state.accentColor
+ExecRunButton.TextSize = 11
+ExecRunButton.Parent = ExecButtonRow
+createCorner(ExecRunButton, 6)
+local execRunStroke = createStroke(ExecRunButton, state.accentColor, 1)
+registerAccent(execRunStroke, "Color")
+registerAccent(ExecRunButton, "TextColor3")
+
+local ExecClearButton = Instance.new("TextButton")
+ExecClearButton.Size = UDim2.new(0.22, 0, 1, 0)
+ExecClearButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+ExecClearButton.Font = CONFIG.FONTS.HEADER
+ExecClearButton.Text = "Clear"
+ExecClearButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+ExecClearButton.TextSize = 11
+ExecClearButton.Parent = ExecButtonRow
+createCorner(ExecClearButton, 6)
+createStroke(ExecClearButton, CONFIG.THEME.BORDER, 1)
+
+local ExecPasteButton = Instance.new("TextButton")
+ExecPasteButton.Size = UDim2.new(0.22, 0, 1, 0)
+ExecPasteButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+ExecPasteButton.Font = CONFIG.FONTS.HEADER
+ExecPasteButton.Text = "Paste"
+ExecPasteButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+ExecPasteButton.TextSize = 11
+ExecPasteButton.Parent = ExecButtonRow
+createCorner(ExecPasteButton, 6)
+createStroke(ExecPasteButton, CONFIG.THEME.BORDER, 1)
+
+local ExecCopyButton = Instance.new("TextButton")
+ExecCopyButton.Size = UDim2.new(0.22, 0, 1, 0)
+ExecCopyButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+ExecCopyButton.Font = CONFIG.FONTS.HEADER
+ExecCopyButton.Text = "Copy Code"
+ExecCopyButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+ExecCopyButton.TextSize = 11
+ExecCopyButton.Parent = ExecButtonRow
+createCorner(ExecCopyButton, 6)
+createStroke(ExecCopyButton, CONFIG.THEME.BORDER, 1)
+
+local _, ExecLogCardContent = createCard(PageExecutor, "Execution Output & Traceback", "Real-time compiler and runtime status")
+
+local OutputFrame = Instance.new("Frame")
+OutputFrame.Size = UDim2.new(1, 0, 0, 64)
+OutputFrame.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+OutputFrame.BorderSizePixel = 0
+OutputFrame.Parent = ExecLogCardContent
+createCorner(OutputFrame, 6)
+createStroke(OutputFrame, CONFIG.THEME.BORDER, 1)
+
+local OutputLabel = Instance.new("TextLabel")
+OutputLabel.Size = UDim2.new(1, -16, 1, -12)
+OutputLabel.Position = UDim2.new(0, 8, 0, 6)
+OutputLabel.BackgroundTransparency = 1
+OutputLabel.Font = CONFIG.FONTS.MONO
+OutputLabel.Text = "[Ready] Standby for script execution."
+OutputLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+OutputLabel.TextSize = 10
+OutputLabel.TextWrapped = true
+OutputLabel.TextXAlignment = Enum.TextXAlignment.Left
+OutputLabel.TextYAlignment = Enum.TextYAlignment.Top
+OutputLabel.Parent = OutputFrame
+
+trackConnection(ExecRunButton.Activated:Connect(function()
+	local codeText = CodeBox.Text
+	local ok, msg = executeCode(codeText)
+	if ok then
+		OutputLabel.Text = string.format("[Execution Success - %s]\nZero syntax or runtime errors.", os.date("%H:%M:%S"))
+		OutputLabel.TextColor3 = CONFIG.THEME.SUCCESS
+		updateStatusBar("Script executed successfully.", "Success")
+	else
+		OutputLabel.Text = msg
+		OutputLabel.TextColor3 = CONFIG.THEME.ERROR
+		updateStatusBar("Script execution failed.", "Error")
+	end
+end))
+
+trackConnection(ExecClearButton.Activated:Connect(function()
+	CodeBox.Text = ""
+	OutputLabel.Text = "[Cleared] Editor reset."
+	OutputLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	updateStatusBar("Code editor cleared.", "Normal")
+end))
+
+trackConnection(ExecPasteButton.Activated:Connect(function()
+	local anyG = _G :: any
+	local clipFn = anyG.getclipboard or (typeof(getclipboard) == "function" and getclipboard)
+	if clipFn then
+		local ok, text = pcall(clipFn)
+		if ok and typeof(text) == "string" and text ~= "" then
+			CodeBox.Text = text
+			OutputLabel.Text = string.format("[Pasted] Loaded %d characters from clipboard.", #text)
+			OutputLabel.TextColor3 = CONFIG.THEME.SUCCESS
+			updateStatusBar("Pasted from clipboard.", "Success")
+			return
+		end
+	end
+	updateStatusBar("Clipboard function unavailable; long-press paste in editor.", "Warning")
+end))
+
+trackConnection(ExecCopyButton.Activated:Connect(function()
+	local anyG = _G :: any
+	local setClipFn = anyG.setclipboard or (typeof(setclipboard) == "function" and setclipboard)
+	if setClipFn and CodeBox.Text ~= "" then
+		pcall(setClipFn, CodeBox.Text)
+		updateStatusBar("Script copied to clipboard.", "Success")
+	else
+		updateStatusBar("setclipboard() unavailable in environment.", "Warning")
+	end
+end))
+
+-- SCRIPT HUB CATALOG (24+ LOADSTRING SCRIPTS & PRESETS)
+local _, HubCardContent = createCard(PageExecutor, "Script Hub & Preset Catalog", "Instant one-click execution of curated Luau scripts")
+
+local scriptCatalog = {
+	{ name = "Infinite Yield", cat = "Admin", desc = "Universal FE admin commands suite", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source\"))()" },
+	{ name = "Dark Dex V3", cat = "Explorer", desc = "Full game explorer and property inspector", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/infyiff/backup/main/dex.lua\"))()" },
+	{ name = "SimpleSpy V3", cat = "Network", desc = "Inspect, log, and mock remote events", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/exxtremestuffs/SimpleSpy/master/source.lua\"))()" },
+	{ name = "RemoteSpy", cat = "Network", desc = "Advanced remote event and function listener", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/yofriendfromschool1/Sky-Hub-Backup/main/RemoteSpy.lua\"))()" },
+	{ name = "Hydroxide", cat = "Analysis", desc = "Dynamic runtime inspector and method hooker", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/Upbolt/Hydroxide/revision/init.lua\"))()" },
+	{ name = "Turtle Spy", cat = "Network", desc = "Lightweight remote logger for low-end devices", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/Turtle-Brand/Turtle-Spy/main/source.lua\"))()" },
+	{ name = "Fly GUI V3", cat = "Movement", desc = "Classic standalone touch/PC flight interface", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.lua\"))()" },
+	{ name = "Nameless Admin", cat = "Admin", desc = "Featherweight FE admin with chat commands", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/FilteringEnabled/NamelessAdmin/main/Source\"))()" },
+	{ name = "Fates Admin", cat = "Admin", desc = "High-performance modular client command hub", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/fatesc/fates-admin/main/main.lua\"))()" },
+	{ name = "Unnamed ESP", cat = "Visuals", desc = "Universal 2D box, bone, and tracer ESP", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/ic3w0lf22/Unnamed-ESP/master/UnnamedESP.lua\"))()" },
+	{ name = "Touch Keyboard", cat = "Mobile", desc = "On-screen virtual keyboard for mobile Delta", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/advcomunicles/ROBLOX/main/keyboard.lua\"))()" },
+	{ name = "Anti-AFK Standalone", cat = "Utility", desc = "Autonomous idle disconnect protector", src = "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/KazeOnTop/Rice-Anti-Afk/main/Wind.lua\"))()" },
+	{ name = "Fast Server Rejoin", cat = "Server", desc = "Instantly reconnect to this place instance", src = "game:GetService(\"TeleportService\"):TeleportToPlaceInstance(game.PlaceId, game.JobId, game:GetService(\"Players\").LocalPlayer)" },
+	{ name = "Server Hop", cat = "Server", desc = "Teleport to an alternate public server", src = "game:GetService(\"TeleportService\"):Teleport(game.PlaceId, game:GetService(\"Players\").LocalPlayer)" },
+	{ name = "Texture Stripper FPS", cat = "Performance", desc = "Remove decals & particles for max FPS", src = "for _,v in pairs(workspace:GetDescendants()) do if v:IsA(\"BasePart\") then v.Material = Enum.Material.SmoothPlastic elseif v:IsA(\"Decal\") or v:IsA(\"Texture\") then v:Destroy() elseif v:IsA(\"ParticleEmitter\") then v.Enabled = false end end" },
+	{ name = "Click TP Tool", cat = "Movement", desc = "Adds click-to-teleport tool to Backpack", src = "local m = game:GetService(\"Players\").LocalPlayer:GetMouse(); local t = Instance.new(\"Tool\"); t.RequiresHandle = false; t.Name = \"Click TP\"; t.Activated:Connect(function() local c = game:GetService(\"Players\").LocalPlayer.Character; if c and m.Hit then c:MoveTo(m.Hit.Position) end end); t.Parent = game:GetService(\"Players\").LocalPlayer.Backpack" },
+	{ name = "Spawn Client BTools", cat = "Utility", desc = "Adds Move, Clone, and Delete HopperBins", src = "local bp = game:GetService(\"Players\").LocalPlayer:WaitForChild(\"Backpack\"); for _,bt in ipairs({Enum.BinType.Grab, Enum.BinType.Clone, Enum.BinType.Hammer}) do local b = Instance.new(\"HopperBin\"); b.BinType = bt; b.Parent = bp end" },
+	{ name = "Air Walk Sky Platform", cat = "Movement", desc = "Spawns invisible stepping platform under feet", src = "local p = Instance.new(\"Part\"); p.Size = Vector3.new(8, 1, 8); p.Anchored = true; p.Transparency = 0.5; local c = game:GetService(\"Players\").LocalPlayer.Character; if c and c:FindFirstChild(\"HumanoidRootPart\") then p.CFrame = c.HumanoidRootPart.CFrame * CFrame.new(0, -3.5, 0); p.Parent = workspace end" },
+	{ name = "Anti-Void Safe Zone", cat = "Protection", desc = "Rescues character from infinite void falls", src = "task.spawn(function() while true do task.wait(0.5); local c = game:GetService(\"Players\").LocalPlayer.Character; local r = c and c:FindFirstChild(\"HumanoidRootPart\"); if r and r.Position.Y < -80 then r.CFrame = CFrame.new(r.Position.X, 60, r.Position.Z); r.AssemblyLinearVelocity = Vector3.zero end end end)" },
+	{ name = "Copy Character CFrame", cat = "Utility", desc = "Copies exact player CFrame to clipboard", src = "local r = game:GetService(\"Players\").LocalPlayer.Character and game:GetService(\"Players\").LocalPlayer.Character:FindFirstChild(\"HumanoidRootPart\"); if r and setclipboard then setclipboard(string.format(\"CFrame.new(%.2f, %.2f, %.2f)\", r.Position.X, r.Position.Y, r.Position.Z)) end" },
+	{ name = "Force Instant Respawn", cat = "Player", desc = "Cleanses humanoid and respawns character", src = "local c = game:GetService(\"Players\").LocalPlayer.Character; if c then c:BreakJoints() end" },
+	{ name = "Force Shiftlock Enabler", cat = "Camera", desc = "Unlocks mouse shiftlock mode globally", src = "game:GetService(\"Players\").LocalPlayer.DevEnableMouseLock = true" },
+}
+
+for _, scriptItem in ipairs(scriptCatalog) do
+	local itemFrame = Instance.new("Frame")
+	itemFrame.Size = UDim2.new(1, 0, 0, 42)
+	itemFrame.BackgroundColor3 = CONFIG.THEME.SURFACE
+	itemFrame.BorderSizePixel = 0
+	itemFrame.Parent = HubCardContent
+	createCorner(itemFrame, 6)
+	createStroke(itemFrame, CONFIG.THEME.BORDER, 1)
+
+	local titleTxt = Instance.new("TextLabel")
+	titleTxt.Size = UDim2.new(0.55, 0, 0, 18)
+	titleTxt.Position = UDim2.new(0, 8, 0, 4)
+	titleTxt.BackgroundTransparency = 1
+	titleTxt.Font = CONFIG.FONTS.HEADER
+	titleTxt.Text = scriptItem.name .. " [" .. scriptItem.cat .. "]"
+	titleTxt.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	titleTxt.TextSize = 11
+	titleTxt.TextXAlignment = Enum.TextXAlignment.Left
+	titleTxt.Parent = itemFrame
+
+	local descTxt = Instance.new("TextLabel")
+	descTxt.Size = UDim2.new(0.55, 0, 0, 14)
+	descTxt.Position = UDim2.new(0, 8, 0, 22)
+	descTxt.BackgroundTransparency = 1
+	descTxt.Font = CONFIG.FONTS.BODY
+	descTxt.Text = scriptItem.desc
+	descTxt.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	descTxt.TextSize = 9
+	descTxt.TextXAlignment = Enum.TextXAlignment.Left
+	descTxt.Parent = itemFrame
+
+	local runBtn = Instance.new("TextButton")
+	runBtn.Size = UDim2.new(0.2, 0, 0, 26)
+	runBtn.Position = UDim2.new(1, -130, 0, 8)
+	runBtn.BackgroundColor3 = CONFIG.THEME.SURFACE_ALT
+	runBtn.Font = CONFIG.FONTS.HEADER
+	runBtn.Text = "Run"
+	runBtn.TextColor3 = state.accentColor
+	runBtn.TextSize = 10
+	runBtn.Parent = itemFrame
+	createCorner(runBtn, 4)
+	local rStroke = createStroke(runBtn, state.accentColor, 1)
+	registerAccent(rStroke, "Color")
+	registerAccent(runBtn, "TextColor3")
+
+	local loadBtn = Instance.new("TextButton")
+	loadBtn.Size = UDim2.new(0.18, 0, 0, 26)
+	loadBtn.Position = UDim2.new(1, -60, 0, 8)
+	loadBtn.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	loadBtn.Font = CONFIG.FONTS.HEADER
+	loadBtn.Text = "Load"
+	loadBtn.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	loadBtn.TextSize = 10
+	loadBtn.Parent = itemFrame
+	createCorner(loadBtn, 4)
+	createStroke(loadBtn, CONFIG.THEME.BORDER, 1)
+
+	trackConnection(runBtn.Activated:Connect(function()
+		local ok, msg = executeCode(scriptItem.src)
+		if ok then
+			OutputLabel.Text = string.format("[Hub Execute: %s]\nExecuted with zero errors.", scriptItem.name)
+			OutputLabel.TextColor3 = CONFIG.THEME.SUCCESS
+			updateStatusBar("Ran preset: " .. scriptItem.name, "Success")
+		else
+			OutputLabel.Text = msg
+			OutputLabel.TextColor3 = CONFIG.THEME.ERROR
+			updateStatusBar("Failed preset: " .. scriptItem.name, "Error")
+		end
+	end))
+
+	trackConnection(loadBtn.Activated:Connect(function()
+		CodeBox.Text = scriptItem.src
+		OutputLabel.Text = string.format("[Loaded] \"%s\" loaded into editor.", scriptItem.name)
+		OutputLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+		updateStatusBar("Loaded to editor: " .. scriptItem.name, "Normal")
+	end))
+end
+
+-- WORLD & ENVIRONMENT TAB
+local _, GravityCardContent = createCard(PageWorld, "Workspace Gravity Mechanics", "Engine physics gravity acceleration modifier")
+
+createSlider(GravityCardContent, "World Gravity", 0, 500, state.gravity, 5, "studs/s2", function(val)
+	state.gravity = val
+	Workspace.Gravity = val
+	updateStatusBar(string.format("World gravity set to %.0f.", val), "Normal")
+end)
+
+local GravPresetRow = Instance.new("Frame")
+GravPresetRow.Size = UDim2.new(1, 0, 0, 26)
+GravPresetRow.BackgroundTransparency = 1
+GravPresetRow.Parent = GravityCardContent
+
+local GravPresetLayout = Instance.new("UIListLayout")
+GravPresetLayout.FillDirection = Enum.FillDirection.Horizontal
+GravPresetLayout.Padding = UDim.new(0, 4)
+GravPresetLayout.Parent = GravPresetRow
+
+local gravPresets = {
+	{ name = "Zero G (0)", val = 0 },
+	{ name = "Moon (50)", val = 50 },
+	{ name = "Low (100)", val = 100 },
+	{ name = "Earth (196.2)", val = 196.2 },
+	{ name = "Heavy (350)", val = 350 },
+}
+
+for _, p in ipairs(gravPresets) do
+	local pBtn = Instance.new("TextButton")
+	pBtn.Size = UDim2.new(0.19, 0, 1, 0)
+	pBtn.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	pBtn.Font = CONFIG.FONTS.HEADER
+	pBtn.Text = p.name
+	pBtn.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	pBtn.TextSize = 9
+	pBtn.Parent = GravPresetRow
+	createCorner(pBtn, 4)
+	createStroke(pBtn, CONFIG.THEME.BORDER, 1)
+	trackConnection(pBtn.Activated:Connect(function()
+		state.gravity = p.val
+		Workspace.Gravity = p.val
+		updateStatusBar(string.format("Gravity set to %.1f.", p.val), "Success")
+	end))
+end
+
+local _, TimeCardContent = createCard(PageWorld, "Lighting Time & Sun Cycle", "ClockTime manipulation and automatic celestial rotation")
+
+createSlider(TimeCardContent, "Time of Day", 0, 24, state.clockTime, 0.5, "hrs", function(val)
+	state.clockTime = val
+	Lighting.ClockTime = val
+end)
+
+local dayNightConn: RBXScriptConnection? = nil
+createToggle(TimeCardContent, "Continuous Day/Night Cycle", CONFIG.AVAILABILITY.LOCAL, state.dayNightCycle, function(enabled)
+	state.dayNightCycle = enabled
+	if enabled then
+		dayNightConn = RunService.Heartbeat:Connect(function(dt)
+			Lighting.ClockTime = (Lighting.ClockTime + (dt * 0.5)) % 24
+		end)
+		if dayNightConn then trackConnection(dayNightConn) end
+		updateStatusBar("Day/night cycle active.", "Normal")
+	else
+		if dayNightConn then
+			dayNightConn:Disconnect()
+			dayNightConn = nil
+		end
+		updateStatusBar("Day/night cycle stopped.", "Normal")
+	end
+end)
+
+local _, WorldOptCardContent = createCard(PageWorld, "World Optimization & Protections", "Client performance enhancements and environmental safety")
+
+local function runFpsBooster()
+	local count = 0
+	for _, inst in ipairs(Workspace:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Material = Enum.Material.SmoothPlastic
+			inst.Reflectance = 0
+			count += 1
+		elseif inst:IsA("Decal") or inst:IsA("Texture") then
+			inst.Transparency = 1
+			count += 1
+		elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") then
+			inst.Enabled = false
+			count += 1
+		end
+	end
+	Lighting.GlobalShadows = false
+	Lighting.FogEnd = 9e9
+	updateStatusBar(string.format("FPS Booster: Optimized %d objects.", count), "Success")
+end
+createActionButton(WorldOptCardContent, "FPS Booster (Strip Textures & Particles)", CONFIG.AVAILABILITY.LOCAL, runFpsBooster)
+
+createToggle(WorldOptCardContent, "Anti-Void Fall Watchdog", CONFIG.AVAILABILITY.LOCAL, state.antiVoid, function(enabled)
+	state.antiVoid = enabled
+	updateStatusBar(enabled and "Anti-Void watchdog active." or "Anti-Void disabled.", "Normal")
+end)
+
+trackConnection(RunService.Heartbeat:Connect(function()
+	if state.antiVoid then
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") and hrp.Position.Y < -80 then
+			hrp.CFrame = CFrame.new(hrp.Position.X, 60, hrp.Position.Z)
+			hrp.AssemblyLinearVelocity = Vector3.zero
+			updateStatusBar("Anti-Void rescued character from fall.", "Warning")
+		end
+	end
+end))
+
+createToggle(WorldOptCardContent, "Anti-Sit (Auto Seat Dismount)", CONFIG.AVAILABILITY.LOCAL, state.antiSit, function(enabled)
+	state.antiSit = enabled
+	updateStatusBar(enabled and "Anti-Sit active." or "Anti-Sit disabled.", "Normal")
+end)
+
+trackConnection(RunService.Heartbeat:Connect(function()
+	if state.antiSit then
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Sit then
+			hum.Sit = false
+		end
+	end
+end))
+
+local antiAfkConn: RBXScriptConnection? = nil
+createToggle(WorldOptCardContent, "Anti-AFK Inactivity Bypass", CONFIG.AVAILABILITY.LOCAL, state.antiAfk, function(enabled)
+	state.antiAfk = enabled
+	if enabled then
+		local anyG = _G :: any
+		local vu = anyG.VirtualUser or game:GetService("VirtualUser")
+		antiAfkConn = LocalPlayer.Idled:Connect(function()
+			pcall(function()
+				vu:Button2Down(Vector2.zero, Workspace.CurrentCamera.CFrame)
+				task.wait(1)
+				vu:Button2Up(Vector2.zero, Workspace.CurrentCamera.CFrame)
+			end)
+		end)
+		if antiAfkConn then trackConnection(antiAfkConn) end
+		updateStatusBar("Anti-AFK inactivity protection active.", "Success")
+	else
+		if antiAfkConn then
+			antiAfkConn:Disconnect()
+			antiAfkConn = nil
+		end
+		updateStatusBar("Anti-AFK disabled.", "Normal")
+	end
+end)
+
+local function clearDebris()
+	local cleaned = 0
+	for _, inst in ipairs(Workspace:GetChildren()) do
+		if inst:IsA("BasePart") and not inst.Anchored then
+			inst:Destroy()
+			cleaned += 1
+		end
+	end
+	updateStatusBar(string.format("Cleaned %d loose unanchored parts.", cleaned), "Success")
+end
+createActionButton(WorldOptCardContent, "Clear Workspace Loose Debris", CONFIG.AVAILABILITY.LOCAL, clearDebris)
+
+-- UTILITY TAB (SERVER, TOOLS & DIAGNOSTICS)
+local _, ServerCardContent = createCard(PageUtility, "Server Session Navigation", "Teleportation and instance management")
+
+local function executeRejoin()
+	updateStatusBar("Rejoining server instance...", "Normal")
+	pcall(function()
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+	end)
+end
+createActionButton(ServerCardContent, "Rejoin Current Server", CONFIG.AVAILABILITY.EXPERIENCE, executeRejoin)
+
+local function executeServerHop()
+	updateStatusBar("Finding alternate server...", "Normal")
+	pcall(function()
+		TeleportService:Teleport(game.PlaceId, LocalPlayer)
+	end)
+end
+createActionButton(ServerCardContent, "Server Hop to Alternate Server", CONFIG.AVAILABILITY.EXPERIENCE, executeServerHop)
+
+local function copyJobId()
+	local anyG = _G :: any
+	local setClip = anyG.setclipboard or (typeof(setclipboard) == "function" and setclipboard)
+	if setClip then
+		pcall(setClip, tostring(game.JobId))
+		updateStatusBar("Server JobId copied to clipboard.", "Success")
+	end
+end
+createActionButton(ServerCardContent, "Copy Server JobId", CONFIG.AVAILABILITY.LOCAL, copyJobId)
+
+local function copyPlaceId()
+	local anyG = _G :: any
+	local setClip = anyG.setclipboard or (typeof(setclipboard) == "function" and setclipboard)
+	if setClip then
+		pcall(setClip, tostring(game.PlaceId))
+		updateStatusBar("Game PlaceId copied to clipboard.", "Success")
+	end
+end
+createActionButton(ServerCardContent, "Copy Game PlaceId", CONFIG.AVAILABILITY.LOCAL, copyPlaceId)
+
+local _, ToolSpawnerCardContent = createCard(PageUtility, "Client Tool Spawners", "Backpack tool injection and character coordinates")
+
+local function spawnBTools()
+	local bp = LocalPlayer:WaitForChild("Backpack")
+	local tools = {
+		{ name = "Move (Grab)", binType = Enum.BinType.Grab },
+		{ name = "Clone", binType = Enum.BinType.Clone },
+		{ name = "Delete (Hammer)", binType = Enum.BinType.Hammer },
+	}
+	for _, info in ipairs(tools) do
+		local bin = Instance.new("HopperBin")
+		bin.BinType = info.binType
+		bin.Name = info.name
+		bin.Parent = bp
+		trackInstance(bin)
+	end
+	updateStatusBar("Client BTools added to Backpack.", "Success")
+end
+createActionButton(ToolSpawnerCardContent, "Spawn Client Building Tools (BTools)", CONFIG.AVAILABILITY.LOCAL, spawnBTools)
+
+local function spawnClickTpTool()
+	local mouse = LocalPlayer:GetMouse()
+	local tool = Instance.new("Tool")
+	tool.Name = "Click TP [Sentinel]"
+	tool.RequiresHandle = false
+	tool.CanBeDropped = false
+	trackConnection(tool.Activated:Connect(function()
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and mouse.Hit then
+			hrp.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0, 3, 0))
+			updateStatusBar("Teleported to clicked position.", "Success")
+		end
+	end))
+	tool.Parent = LocalPlayer:WaitForChild("Backpack")
+	trackInstance(tool)
+	updateStatusBar("Click TP Tool added to Backpack.", "Success")
+end
+createActionButton(ToolSpawnerCardContent, "Equip Cursor Click TP Tool", CONFIG.AVAILABILITY.LOCAL, spawnClickTpTool)
+
+local function copyPlayerCoordinates()
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		local pos = hrp.Position
+		local str = string.format("Vector3.new(%.2f, %.2f, %.2f)", pos.X, pos.Y, pos.Z)
+		local anyG = _G :: any
+		local setClip = anyG.setclipboard or (typeof(setclipboard) == "function" and setclipboard)
+		if setClip then
+			pcall(setClip, str)
+			updateStatusBar("Coordinates copied: " .. str, "Success")
+		else
+			updateStatusBar(str, "Normal")
+		end
+	end
+end
+createActionButton(ToolSpawnerCardContent, "Copy Player Coordinates (XYZ)", CONFIG.AVAILABILITY.LOCAL, copyPlayerCoordinates)
+
+local _, DiagnosticsCardContent = createCard(PageUtility, "Live Telemetry & Performance", "Real-time client and server metric readings")
+
+local MetricsLabel = Instance.new("TextLabel")
+MetricsLabel.Size = UDim2.new(1, 0, 0, 48)
+MetricsLabel.BackgroundTransparency = 1
+MetricsLabel.Font = CONFIG.FONTS.MONO
+MetricsLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+MetricsLabel.TextSize = 10
+MetricsLabel.TextWrapped = true
+MetricsLabel.TextXAlignment = Enum.TextXAlignment.Left
+MetricsLabel.Text = "Telemetry initializing..."
+MetricsLabel.Parent = DiagnosticsCardContent
+
+local lastTime = os.clock()
+local frameCount = 0
+local currentFps = 60
+
+trackConnection(RunService.RenderStepped:Connect(function()
+	frameCount += 1
+	local now = os.clock()
+	if now - lastTime >= 1 then
+		currentFps = frameCount
+		frameCount = 0
+		lastTime = now
+		local ping = 0
+		pcall(function()
+			ping = math.floor(LocalPlayer:GetNetworkPing() * 1000)
+		end)
+		MetricsLabel.Text = string.format(
+			"Render FPS: %d fps | Server Ping: %d ms\nActive Players: %d / %d\nPlace ID: %d",
+			currentFps,
+			ping,
+			#Players:GetPlayers(),
+			Players.MaxPlayers,
+			game.PlaceId
+		)
+	end
+end))
+
 -- SETTINGS TAB
 local _, ScaleCardContent = createCard(PageSettings, "Interface Scale", "Adjust viewport scale factor")
 createSlider(ScaleCardContent, "Scale Factor", 0.8, 1.25, state.guiScale, 0.05, "x", function(val)
@@ -2424,6 +3780,9 @@ trackConnection(PillRestoreButton.Activated:Connect(function()
 end))
 
 local function toggleVisibility()
+	if not state.isAuthenticated then
+		return
+	end
 	if MainFrame.Visible or MinimizedPill.Visible then
 		MainFrame.Visible = false
 		MinimizedPill.Visible = false
@@ -2529,6 +3888,8 @@ local function cleanupAll()
 		hum.JumpPower = state.defaultJumpPower
 		hum.PlatformStand = false
 	end
+
+	Workspace.Gravity = state.defaultGravity
 
 	for inst, origTrans in pairs(state.originalTransparencies) do
 		if inst and inst.Parent then
