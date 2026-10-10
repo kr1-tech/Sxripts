@@ -1,4 +1,3 @@
-
 --!strict
 -- SECTION 1: CONFIGURATION
 -- Defines layout dimensions, color schemes, typography, and default operational parameters.
