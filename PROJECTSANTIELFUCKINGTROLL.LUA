@@ -1,4 +1,3 @@
---!strict
 -- SECTION 1: CONFIGURATION
 -- Defines layout dimensions, color schemes, typography, and default operational parameters.
 local CONFIG = {
@@ -336,22 +335,51 @@ local function trackInstance<T>(inst: T): T
 end
 
 -- Wrap Sections 4-8 in a pcall to guarantee visibility of any build errors
-local BUILD_OK, BUILD_ERR = pcall(function()
 
--- SECTION 4: GUI CONSTRUCTION & COMPONENT HELPERS
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = CONFIG.GUI_NAME
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.DisplayOrder = 10000
-ScreenGui.IgnoreGuiInset = true -- Critical for accurate screen centering and notch handling on mobile
 
-if typeof(syn) == "table" and typeof(syn.protect_gui) == "function" then
-	pcall(syn.protect_gui, ScreenGui)
-end
+-- =========================================================================
+-- SECTION 3.5: SHARED FORWARD DECLARATIONS (MODULAR REGISTERS ARCHITECTURE)
+-- Guarantees total local registers per scope stay well below Luau's 200 limit.
+-- =========================================================================
+local ScreenGui: ScreenGui
+local GuiScale: UIScale
+local MainFrame: Frame
+local MinimizedPill: Frame
+local PillRestoreButton: TextButton
+local MobileToggleButton: TextButton
+local TitleDragHandle: Frame
+local CloseButton: TextButton
+local MinimizeButton: TextButton
+local TabBar: ScrollingFrame
+local ContentViewport: Frame
+local StatusBar: Frame
+local StatusTargetLabel: TextLabel
+local StatusFeedbackLabel: TextLabel
 
-ScreenGui.Parent = TargetParent
+local PagePlayerTools: ScrollingFrame
+local PageTroll: ScrollingFrame
+local PageMovement: ScrollingFrame
+local PageVisuals: ScrollingFrame
+local PageExecutor: ScrollingFrame
+local PageWorld: ScrollingFrame
+local PageUtility: ScrollingFrame
+local PageSettings: ScrollingFrame
+local PageInfo: ScrollingFrame
 
+local updateTargetCard: () -> () = function() end
+local abortFling: () -> () = function() end
+local stopTouchFling: () -> () = function() end
+local stopOrbit: () -> () = function() end
+local stopHeadSit: () -> () = function() end
+local stopFlight: () -> () = function() end
+local stopNoclip: () -> () = function() end
+local setFlightVisual: ((boolean) -> ())? = nil
+local setOrbitVisual: ((boolean) -> ())? = nil
+local setHeadSitVisual: ((boolean) -> ())? = nil
+
+
+
+-- SECTION 4: GUI COMPONENT GENERATORS & HELPER FUNCTIONS
 local function computeAutoFitScale(): number
 	local vp = getViewportSize()
 	local maxW = vp.X - 24
@@ -368,13 +396,6 @@ local function computeAutoFitScale(): number
 	end
 	return 1.0
 end
-
-local initialScale = computeAutoFitScale()
-state.guiScale = initialScale
-
-local GuiScale = Instance.new("UIScale")
-GuiScale.Scale = state.guiScale
-GuiScale.Parent = ScreenGui
 
 local function animateTween(inst: Instance, duration: number, props: { [string]: any })
 	if state.animationsEnabled then
@@ -423,68 +444,10 @@ local function updateAccentColor(newColor: Color3)
 	end
 end
 
--- Construct Primary Containers
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = CONFIG.DIMENSIONS.WINDOW_SIZE
-MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-MainFrame.BackgroundColor3 = CONFIG.THEME.BACKGROUND
-MainFrame.BorderSizePixel = 0
-MainFrame.ClipsDescendants = false
-MainFrame.Active = true -- Blocks touch fallthrough to game world
-MainFrame.Visible = false
-MainFrame.Parent = ScreenGui
-createCorner(MainFrame, 10)
-createStroke(MainFrame, CONFIG.THEME.BORDER, 1)
-
-local MinimizedPill = Instance.new("Frame")
-MinimizedPill.Name = "MinimizedPill"
-MinimizedPill.Size = CONFIG.DIMENSIONS.MINIMIZED_SIZE
-MinimizedPill.Position = UDim2.new(0.5, 0, 0.08, 0)
-MinimizedPill.AnchorPoint = Vector2.new(0.5, 0)
-MinimizedPill.BackgroundColor3 = CONFIG.THEME.SURFACE
-MinimizedPill.BorderSizePixel = 0
-MinimizedPill.Active = true
-MinimizedPill.Visible = false
-MinimizedPill.Parent = ScreenGui
-createCorner(MinimizedPill, 18)
-local pillStroke = createStroke(MinimizedPill, CONFIG.THEME.BORDER, 1)
-registerAccent(pillStroke, "Color")
-
-local PillRestoreButton = Instance.new("TextButton")
-PillRestoreButton.Size = UDim2.new(1, 0, 1, 0)
-PillRestoreButton.BackgroundTransparency = 1
-PillRestoreButton.Font = CONFIG.FONTS.HEADER
-PillRestoreButton.Text = "Sentinel | Restore"
-PillRestoreButton.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
-PillRestoreButton.TextSize = 13
-PillRestoreButton.Parent = MinimizedPill
-
-local MobileToggleButton = Instance.new("TextButton")
-MobileToggleButton.Name = "MobileToggleButton"
-MobileToggleButton.Size = CONFIG.DIMENSIONS.MOBILE_BTN_SIZE
-MobileToggleButton.Position = UDim2.new(0, 16, 0.45, 0)
-MobileToggleButton.AnchorPoint = Vector2.new(0, 0.5)
-MobileToggleButton.BackgroundColor3 = CONFIG.THEME.SURFACE
-MobileToggleButton.BorderSizePixel = 0
-MobileToggleButton.Font = CONFIG.FONTS.TITLE
-MobileToggleButton.Text = "S"
-MobileToggleButton.TextColor3 = state.accentColor
-MobileToggleButton.TextSize = 22
-MobileToggleButton.AutoButtonColor = false
-MobileToggleButton.Active = true
-MobileToggleButton.ZIndex = 250
-MobileToggleButton.Visible = false
-MobileToggleButton.Parent = ScreenGui
-createCorner(MobileToggleButton, 23)
-local mobileStroke = createStroke(MobileToggleButton, state.accentColor, 1.5)
-registerAccent(mobileStroke, "Color")
-registerAccent(MobileToggleButton, "TextColor3")
-
 local function clampMainFrameToBounds()
+	if not MainFrame then return end
 	local vp = getViewportSize()
-	local scale = GuiScale.Scale
+	local scale = GuiScale and GuiScale.Scale or 1
 	if scale <= 0.1 then scale = 1 end
 
 	local halfW = (MainFrame.AbsoluteSize.X / 2)
@@ -507,531 +470,6 @@ local function clampMainFrameToBounds()
 	MainFrame.Position = UDim2.new(0.5, clampedOffsetX, 0.5, clampedOffsetY)
 end
 
-local function recenterMainFrame()
-	MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-	MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	if not state.manualScaleOverride then
-		local newScale = computeAutoFitScale()
-		state.guiScale = newScale
-		GuiScale.Scale = newScale
-	end
-	updateStatusBar("Interface centered to screen.", "Normal")
-end
-
--- =========================================================================
--- LOADING SCREEN & KEY CENTER (ACCESS GATEWAY)
--- =========================================================================
-local LoadingModal = Instance.new("Frame")
-LoadingModal.Name = "Sentinel_LoadingModal"
-LoadingModal.Size = UDim2.new(0, 360, 0, 180)
-LoadingModal.Position = UDim2.new(0.5, 0, 0.5, 0)
-LoadingModal.AnchorPoint = Vector2.new(0.5, 0.5)
-LoadingModal.BackgroundColor3 = CONFIG.THEME.BACKGROUND
-LoadingModal.BorderSizePixel = 0
-LoadingModal.Active = true
-LoadingModal.ZIndex = 500
-LoadingModal.Parent = ScreenGui
-createCorner(LoadingModal, 12)
-local loadingStroke = createStroke(LoadingModal, CONFIG.THEME.BORDER, 1.5)
-registerAccent(loadingStroke, "Color")
-
-local LoadingTitle = Instance.new("TextLabel")
-LoadingTitle.Size = UDim2.new(1, -24, 0, 24)
-LoadingTitle.Position = UDim2.new(0, 12, 0, 18)
-LoadingTitle.BackgroundTransparency = 1
-LoadingTitle.Font = CONFIG.FONTS.TITLE
-LoadingTitle.Text = "SENTINEL"
-LoadingTitle.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
-LoadingTitle.TextSize = 18
-LoadingTitle.TextXAlignment = Enum.TextXAlignment.Center
-LoadingTitle.ZIndex = 501
-LoadingTitle.Parent = LoadingModal
-
-local LoadingSubtitle = Instance.new("TextLabel")
-LoadingSubtitle.Size = UDim2.new(1, -24, 0, 16)
-LoadingSubtitle.Position = UDim2.new(0, 12, 0, 44)
-LoadingSubtitle.BackgroundTransparency = 1
-LoadingSubtitle.Font = CONFIG.FONTS.MONO
-LoadingSubtitle.Text = "MODULAR CLIENT SUITE | v" .. CONFIG.VERSION
-LoadingSubtitle.TextColor3 = state.accentColor
-LoadingSubtitle.TextSize = 10
-LoadingSubtitle.TextXAlignment = Enum.TextXAlignment.Center
-LoadingSubtitle.ZIndex = 501
-LoadingSubtitle.Parent = LoadingModal
-registerAccent(LoadingSubtitle, "TextColor3")
-
-local LoadingStatus = Instance.new("TextLabel")
-LoadingStatus.Size = UDim2.new(1, -32, 0, 18)
-LoadingStatus.Position = UDim2.new(0, 16, 0, 85)
-LoadingStatus.BackgroundTransparency = 1
-LoadingStatus.Font = CONFIG.FONTS.BODY
-LoadingStatus.Text = "Initializing engine hooks..."
-LoadingStatus.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-LoadingStatus.TextSize = 11
-LoadingStatus.TextXAlignment = Enum.TextXAlignment.Left
-LoadingStatus.ZIndex = 501
-LoadingStatus.Parent = LoadingModal
-
-local ProgressBarTrack = Instance.new("Frame")
-ProgressBarTrack.Size = UDim2.new(1, -32, 0, 8)
-ProgressBarTrack.Position = UDim2.new(0, 16, 0, 110)
-ProgressBarTrack.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-ProgressBarTrack.BorderSizePixel = 0
-ProgressBarTrack.ZIndex = 501
-ProgressBarTrack.Parent = LoadingModal
-createCorner(ProgressBarTrack, 4)
-createStroke(ProgressBarTrack, CONFIG.THEME.BORDER, 1)
-
-local ProgressBarFill = Instance.new("Frame")
-ProgressBarFill.Size = UDim2.new(0, 0, 1, 0)
-ProgressBarFill.BackgroundColor3 = state.accentColor
-ProgressBarFill.BorderSizePixel = 0
-ProgressBarFill.ZIndex = 502
-ProgressBarFill.Parent = ProgressBarTrack
-createCorner(ProgressBarFill, 4)
-registerAccent(ProgressBarFill, "BackgroundColor3")
-
-local LoadingFooter = Instance.new("TextLabel")
-LoadingFooter.Size = UDim2.new(1, -32, 0, 14)
-LoadingFooter.Position = UDim2.new(0, 16, 0, 134)
-LoadingFooter.BackgroundTransparency = 1
-LoadingFooter.Font = CONFIG.FONTS.MONO
-LoadingFooter.Text = "Delta & Mobile Protected Runtime"
-LoadingFooter.TextColor3 = CONFIG.THEME.TEXT_MUTED
-LoadingFooter.TextSize = 9
-LoadingFooter.TextXAlignment = Enum.TextXAlignment.Center
-LoadingFooter.ZIndex = 501
-LoadingFooter.Parent = LoadingModal
-
--- KEY CENTER (LOGIN GATEWAY)
-local KeyCenterModal = Instance.new("Frame")
-KeyCenterModal.Name = "Sentinel_KeyCenter"
-KeyCenterModal.Size = UDim2.new(0, 380, 0, 310)
-KeyCenterModal.Position = UDim2.new(0.5, 0, 0.5, 0)
-KeyCenterModal.AnchorPoint = Vector2.new(0.5, 0.5)
-KeyCenterModal.BackgroundColor3 = CONFIG.THEME.BACKGROUND
-KeyCenterModal.BorderSizePixel = 0
-KeyCenterModal.Active = true
-KeyCenterModal.Visible = false
-KeyCenterModal.ZIndex = 500
-KeyCenterModal.Parent = ScreenGui
-createCorner(KeyCenterModal, 12)
-local keyStroke = createStroke(KeyCenterModal, CONFIG.THEME.BORDER, 1.5)
-registerAccent(keyStroke, "Color")
-
-local KeyHeader = Instance.new("Frame")
-KeyHeader.Size = UDim2.new(1, 0, 0, 48)
-KeyHeader.BackgroundColor3 = CONFIG.THEME.SURFACE
-KeyHeader.BorderSizePixel = 0
-KeyHeader.ZIndex = 501
-KeyHeader.Parent = KeyCenterModal
-createCorner(KeyHeader, 12)
-
-local KeyHeaderCover = Instance.new("Frame")
-KeyHeaderCover.Size = UDim2.new(1, 0, 0, 10)
-KeyHeaderCover.Position = UDim2.new(0, 0, 1, -10)
-KeyHeaderCover.BackgroundColor3 = CONFIG.THEME.SURFACE
-KeyHeaderCover.BorderSizePixel = 0
-KeyHeaderCover.ZIndex = 501
-KeyHeaderCover.Parent = KeyHeader
-
-local KeyTitle = Instance.new("TextLabel")
-KeyTitle.Size = UDim2.new(1, -24, 0, 20)
-KeyTitle.Position = UDim2.new(0, 12, 0, 8)
-KeyTitle.BackgroundTransparency = 1
-KeyTitle.Font = CONFIG.FONTS.TITLE
-KeyTitle.Text = "SENTINEL | ACCESS GATEWAY"
-KeyTitle.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
-KeyTitle.TextSize = 13
-KeyTitle.TextXAlignment = Enum.TextXAlignment.Left
-KeyTitle.ZIndex = 502
-KeyTitle.Parent = KeyHeader
-
-local KeySubtitle = Instance.new("TextLabel")
-KeySubtitle.Size = UDim2.new(1, -24, 0, 14)
-KeySubtitle.Position = UDim2.new(0, 12, 0, 28)
-KeySubtitle.BackgroundTransparency = 1
-KeySubtitle.Font = CONFIG.FONTS.MONO
-KeySubtitle.Text = "AUTHENTICATION REQUIRED"
-KeySubtitle.TextColor3 = state.accentColor
-KeySubtitle.TextSize = 10
-KeySubtitle.TextXAlignment = Enum.TextXAlignment.Left
-KeySubtitle.ZIndex = 502
-KeySubtitle.Parent = KeyHeader
-registerAccent(KeySubtitle, "TextColor3")
-
-local UserLabel = Instance.new("TextLabel")
-UserLabel.Size = UDim2.new(1, -32, 0, 14)
-UserLabel.Position = UDim2.new(0, 16, 0, 58)
-UserLabel.BackgroundTransparency = 1
-UserLabel.Font = CONFIG.FONTS.HEADER
-UserLabel.Text = "ACCOUNT USERNAME"
-UserLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-UserLabel.TextSize = 10
-UserLabel.TextXAlignment = Enum.TextXAlignment.Left
-UserLabel.ZIndex = 501
-UserLabel.Parent = KeyCenterModal
-
-local UserBoxContainer = Instance.new("Frame")
-UserBoxContainer.Size = UDim2.new(1, -32, 0, 34)
-UserBoxContainer.Position = UDim2.new(0, 16, 0, 76)
-UserBoxContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-UserBoxContainer.BorderSizePixel = 0
-UserBoxContainer.ZIndex = 501
-UserBoxContainer.Parent = KeyCenterModal
-createCorner(UserBoxContainer, 6)
-createStroke(UserBoxContainer, CONFIG.THEME.BORDER, 1)
-
-local UserInputBox = Instance.new("TextBox")
-UserInputBox.Size = UDim2.new(1, -16, 1, 0)
-UserInputBox.Position = UDim2.new(0, 8, 0, 0)
-UserInputBox.BackgroundTransparency = 1
-UserInputBox.Font = CONFIG.FONTS.MONO
-UserInputBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
-UserInputBox.PlaceholderText = "Enter Username..."
-UserInputBox.Text = ""
-UserInputBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
-UserInputBox.TextSize = 11
-UserInputBox.ClearTextOnFocus = false
-UserInputBox.TextXAlignment = Enum.TextXAlignment.Left
-UserInputBox.ZIndex = 502
-UserInputBox.Parent = UserBoxContainer
-
-local PassLabel = Instance.new("TextLabel")
-PassLabel.Size = UDim2.new(1, -32, 0, 14)
-PassLabel.Position = UDim2.new(0, 16, 0, 118)
-PassLabel.BackgroundTransparency = 1
-PassLabel.Font = CONFIG.FONTS.HEADER
-PassLabel.Text = "SECURITY PASSWORD"
-PassLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-PassLabel.TextSize = 10
-PassLabel.TextXAlignment = Enum.TextXAlignment.Left
-PassLabel.ZIndex = 501
-PassLabel.Parent = KeyCenterModal
-
-local PassBoxContainer = Instance.new("Frame")
-PassBoxContainer.Size = UDim2.new(1, -32, 0, 34)
-PassBoxContainer.Position = UDim2.new(0, 16, 0, 136)
-PassBoxContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-PassBoxContainer.BorderSizePixel = 0
-PassBoxContainer.ZIndex = 501
-PassBoxContainer.Parent = KeyCenterModal
-createCorner(PassBoxContainer, 6)
-createStroke(PassBoxContainer, CONFIG.THEME.BORDER, 1)
-
-local PassInputBox = Instance.new("TextBox")
-PassInputBox.Size = UDim2.new(1, -16, 1, 0)
-PassInputBox.Position = UDim2.new(0, 8, 0, 0)
-PassInputBox.BackgroundTransparency = 1
-PassInputBox.Font = CONFIG.FONTS.MONO
-PassInputBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
-PassInputBox.PlaceholderText = "Enter Password..."
-PassInputBox.Text = ""
-PassInputBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
-PassInputBox.TextSize = 11
-PassInputBox.ClearTextOnFocus = false
-PassInputBox.TextXAlignment = Enum.TextXAlignment.Left
-PassInputBox.ZIndex = 502
-PassInputBox.Parent = PassBoxContainer
-
-local AuthStatusLabel = Instance.new("TextLabel")
-AuthStatusLabel.Size = UDim2.new(1, -32, 0, 16)
-AuthStatusLabel.Position = UDim2.new(0, 16, 0, 178)
-AuthStatusLabel.BackgroundTransparency = 1
-AuthStatusLabel.Font = CONFIG.FONTS.MONO
-AuthStatusLabel.Text = "Status: Awaiting credentials"
-AuthStatusLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
-AuthStatusLabel.TextSize = 10
-AuthStatusLabel.TextXAlignment = Enum.TextXAlignment.Center
-AuthStatusLabel.ZIndex = 501
-AuthStatusLabel.Parent = KeyCenterModal
-
-local AuthButtonRow = Instance.new("Frame")
-AuthButtonRow.Size = UDim2.new(1, -32, 0, 36)
-AuthButtonRow.Position = UDim2.new(0, 16, 0, 202)
-AuthButtonRow.BackgroundTransparency = 1
-AuthButtonRow.ZIndex = 501
-AuthButtonRow.Parent = KeyCenterModal
-
-local AuthSubmitButton = Instance.new("TextButton")
-AuthSubmitButton.Size = UDim2.new(0.68, 0, 1, 0)
-AuthSubmitButton.Position = UDim2.new(0, 0, 0, 0)
-AuthSubmitButton.BackgroundColor3 = CONFIG.THEME.SURFACE_ALT
-AuthSubmitButton.Font = CONFIG.FONTS.HEADER
-AuthSubmitButton.Text = "Verify & Unlock"
-AuthSubmitButton.TextColor3 = state.accentColor
-AuthSubmitButton.TextSize = 12
-AuthSubmitButton.ZIndex = 502
-AuthSubmitButton.Parent = AuthButtonRow
-createCorner(AuthSubmitButton, 6)
-local submitStroke = createStroke(AuthSubmitButton, state.accentColor, 1)
-registerAccent(submitStroke, "Color")
-registerAccent(AuthSubmitButton, "TextColor3")
-
-local AuthClearButton = Instance.new("TextButton")
-AuthClearButton.Size = UDim2.new(0.28, 0, 1, 0)
-AuthClearButton.Position = UDim2.new(0.72, 0, 0, 0)
-AuthClearButton.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-AuthClearButton.Font = CONFIG.FONTS.HEADER
-AuthClearButton.Text = "Clear"
-AuthClearButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-AuthClearButton.TextSize = 11
-AuthClearButton.ZIndex = 502
-AuthClearButton.Parent = AuthButtonRow
-createCorner(AuthClearButton, 6)
-createStroke(AuthClearButton, CONFIG.THEME.BORDER, 1)
-
-local QuickFillButton = Instance.new("TextButton")
-QuickFillButton.Size = UDim2.new(1, -32, 0, 28)
-QuickFillButton.Position = UDim2.new(0, 16, 0, 246)
-QuickFillButton.BackgroundColor3 = CONFIG.THEME.SURFACE
-QuickFillButton.Font = CONFIG.FONTS.MONO
-QuickFillButton.Text = "Auto-Fill Authorized Key (Quick Access)"
-QuickFillButton.TextColor3 = CONFIG.THEME.TEXT_MUTED
-QuickFillButton.TextSize = 10
-QuickFillButton.ZIndex = 502
-QuickFillButton.Parent = KeyCenterModal
-createCorner(QuickFillButton, 6)
-createStroke(QuickFillButton, CONFIG.THEME.BORDER, 1)
-
--- Loading animation sequence
-task.spawn(function()
-	local stages = {
-		{ pct = 0.25, msg = "Loading core services & camera..." },
-		{ pct = 0.55, msg = "Initializing troll collision & flight engines..." },
-		{ pct = 0.85, msg = "Mounting universal loadstring runtime..." },
-		{ pct = 1.00, msg = "Launching Sentinel Key Center..." },
-	}
-	for _, stage in ipairs(stages) do
-		task.wait(0.35)
-		LoadingStatus.Text = stage.msg
-		animateTween(ProgressBarFill, 0.3, { Size = UDim2.new(stage.pct, 0, 1, 0) })
-	end
-	task.wait(0.3)
-	LoadingModal.Visible = false
-	LoadingModal:Destroy()
-	KeyCenterModal.Visible = true
-end)
-
-local function attemptUnlock()
-	local enteredUser = UserInputBox.Text:gsub("^%s*(.-)%s*$", "%1")
-	local enteredPass = PassInputBox.Text:gsub("^%s*(.-)%s*$", "%1")
-
-	if enteredUser == CONFIG.AUTH.VALID_USER and enteredPass == CONFIG.AUTH.VALID_PASS then
-		state.isAuthenticated = true
-		AuthStatusLabel.Text = "[Access Granted] Verified! Launching Sentinel..."
-		AuthStatusLabel.TextColor3 = CONFIG.THEME.SUCCESS
-		keyStroke.Color = CONFIG.THEME.SUCCESS
-
-		task.wait(0.5)
-		KeyCenterModal:Destroy()
-
-		MainFrame.Visible = true
-		MobileToggleButton.Visible = state.showMobileButton
-		clampMainFrameToBounds()
-		updateStatusBar("Authentication verified. Welcome to Sentinel Suite!", "Success")
-	else
-		AuthStatusLabel.Text = "[Access Denied] Invalid username or password."
-		AuthStatusLabel.TextColor3 = CONFIG.THEME.ERROR
-		keyStroke.Color = CONFIG.THEME.ERROR
-		task.delay(1.5, function()
-			if keyStroke and keyStroke.Parent then
-				keyStroke.Color = CONFIG.THEME.BORDER
-			end
-		end)
-	end
-end
-
-trackConnection(AuthSubmitButton.Activated:Connect(attemptUnlock))
-
-trackConnection(AuthClearButton.Activated:Connect(function()
-	UserInputBox.Text = ""
-	PassInputBox.Text = ""
-	AuthStatusLabel.Text = "Status: Input cleared."
-	AuthStatusLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
-end))
-
-trackConnection(QuickFillButton.Activated:Connect(function()
-	UserInputBox.Text = CONFIG.AUTH.VALID_USER
-	PassInputBox.Text = CONFIG.AUTH.VALID_PASS
-	AuthStatusLabel.Text = "Credentials populated. Tap 'Verify & Unlock' to proceed."
-	AuthStatusLabel.TextColor3 = state.accentColor
-end))
-
-trackConnection(UserInputBox.FocusLost:Connect(function(enterPressed)
-	if enterPressed then
-		PassInputBox:CaptureFocus()
-	end
-end))
-
-trackConnection(PassInputBox.FocusLost:Connect(function(enterPressed)
-	if enterPressed then
-		attemptUnlock()
-	end
-end))
-
--- Title Bar Construction
-local TitleBar = Instance.new("Frame")
-TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 38)
-TitleBar.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-TitleBar.BorderSizePixel = 0
-TitleBar.Parent = MainFrame
-createCorner(TitleBar, 10)
-
-local TitleBarCover = Instance.new("Frame")
-TitleBarCover.Size = UDim2.new(1, 0, 0, 8)
-TitleBarCover.Position = UDim2.new(0, 0, 1, -8)
-TitleBarCover.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-TitleBarCover.BorderSizePixel = 0
-TitleBarCover.Parent = TitleBar
-
-local AccentBar = Instance.new("Frame")
-AccentBar.Name = "AccentBar"
-AccentBar.Size = UDim2.new(1, 0, 0, 2)
-AccentBar.Position = UDim2.new(0, 0, 1, -2)
-AccentBar.BorderSizePixel = 0
-AccentBar.Parent = TitleBar
-registerAccent(AccentBar, "BackgroundColor3")
-
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Text = "SENTINEL"
-TitleLabel.Font = CONFIG.FONTS.TITLE
-TitleLabel.TextSize = 15
-TitleLabel.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Position = UDim2.new(0, 14, 0, 0)
-TitleLabel.Size = UDim2.new(0, 80, 1, 0)
-TitleLabel.Parent = TitleBar
-
-local TagLabel = Instance.new("TextLabel")
-TagLabel.Text = string.format("CLIENT UTILITY [FE] | %s", detectedExecutor ~= "Unknown" and detectedExecutor or (isMobileDevice and "Mobile" or "Desktop"))
-TagLabel.Font = CONFIG.FONTS.MONO
-TagLabel.TextSize = 10
-TagLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
-TagLabel.TextXAlignment = Enum.TextXAlignment.Left
-TagLabel.BackgroundTransparency = 1
-TagLabel.Position = UDim2.new(0, 96, 0, 0)
-TagLabel.Size = UDim2.new(0, 160, 1, 0)
-TagLabel.Parent = TitleBar
-
-local TitleDragHandle = Instance.new("Frame")
-TitleDragHandle.Name = "DragHandle"
-TitleDragHandle.Size = UDim2.new(1, -76, 1, 0)
-TitleDragHandle.Position = UDim2.new(0, 0, 0, 0)
-TitleDragHandle.BackgroundTransparency = 1
-TitleDragHandle.Parent = TitleBar
-
-local MinimizeButton = Instance.new("TextButton")
-MinimizeButton.Name = "MinimizeButton"
-MinimizeButton.Size = UDim2.new(0, 28, 0, 26)
-MinimizeButton.Position = UDim2.new(1, -64, 0, 6)
-MinimizeButton.BackgroundColor3 = CONFIG.THEME.SURFACE
-MinimizeButton.Font = CONFIG.FONTS.HEADER
-MinimizeButton.Text = "-"
-MinimizeButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-MinimizeButton.TextSize = 14
-MinimizeButton.Parent = TitleBar
-createCorner(MinimizeButton, 6)
-createStroke(MinimizeButton, CONFIG.THEME.BORDER, 1)
-
-local CloseButton = Instance.new("TextButton")
-CloseButton.Name = "CloseButton"
-CloseButton.Size = UDim2.new(0, 28, 0, 26)
-CloseButton.Position = UDim2.new(1, -34, 0, 6)
-CloseButton.BackgroundColor3 = CONFIG.THEME.SURFACE
-CloseButton.Font = CONFIG.FONTS.HEADER
-CloseButton.Text = "X"
-CloseButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-CloseButton.TextSize = 12
-CloseButton.Parent = TitleBar
-createCorner(CloseButton, 6)
-createStroke(CloseButton, CONFIG.THEME.BORDER, 1)
-
--- Tab Bar Construction (ScrollingFrame for mobile screens)
-local TabBar = Instance.new("ScrollingFrame")
-TabBar.Name = "TabBar"
-TabBar.Size = UDim2.new(1, -24, 0, 32)
-TabBar.Position = UDim2.new(0, 12, 0, 46)
-TabBar.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-TabBar.BorderSizePixel = 0
-TabBar.ScrollBarThickness = 0
-TabBar.ScrollingDirection = Enum.ScrollingDirection.X
-TabBar.AutomaticCanvasSize = Enum.AutomaticSize.X
-TabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-TabBar.Parent = MainFrame
-createCorner(TabBar, 6)
-createStroke(TabBar, CONFIG.THEME.BORDER, 1)
-
-local TabBarLayout = Instance.new("UIListLayout")
-TabBarLayout.FillDirection = Enum.FillDirection.Horizontal
-TabBarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-TabBarLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-TabBarLayout.Padding = UDim.new(0, 4)
-TabBarLayout.Parent = TabBar
-
-local TabBarPadding = Instance.new("UIPadding")
-TabBarPadding.PaddingLeft = UDim.new(0, 4)
-TabBarPadding.PaddingRight = UDim.new(0, 4)
-TabBarPadding.Parent = TabBar
-
--- Content Viewport
-local ContentViewport = Instance.new("Frame")
-ContentViewport.Name = "ContentViewport"
-ContentViewport.Size = UDim2.new(1, -24, 1, -118)
-ContentViewport.Position = UDim2.new(0, 12, 0, 84)
-ContentViewport.BackgroundTransparency = 1
-ContentViewport.Parent = MainFrame
-
--- Status Bar Construction
-local StatusBar = Instance.new("Frame")
-StatusBar.Name = "StatusBar"
-StatusBar.Size = UDim2.new(1, 0, 0, 28)
-StatusBar.Position = UDim2.new(0, 0, 1, -28)
-StatusBar.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-StatusBar.BorderSizePixel = 0
-StatusBar.Parent = MainFrame
-createCorner(StatusBar, 10)
-
-local StatusBarCover = Instance.new("Frame")
-StatusBarCover.Size = UDim2.new(1, 0, 0, 8)
-StatusBarCover.Position = UDim2.new(0, 0, 0, 0)
-StatusBarCover.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-StatusBarCover.BorderSizePixel = 0
-StatusBarCover.Parent = StatusBar
-
-local StatusSeparator = Instance.new("Frame")
-StatusSeparator.Size = UDim2.new(1, 0, 0, 1)
-StatusSeparator.Position = UDim2.new(0, 0, 0, 0)
-StatusSeparator.BackgroundColor3 = CONFIG.THEME.BORDER
-StatusSeparator.BorderSizePixel = 0
-StatusSeparator.Parent = StatusBar
-
-local StatusTargetLabel = Instance.new("TextLabel")
-StatusTargetLabel.Name = "StatusTarget"
-StatusTargetLabel.Size = UDim2.new(0, 260, 1, 0)
-StatusTargetLabel.Position = UDim2.new(0, 12, 0, 0)
-StatusTargetLabel.BackgroundTransparency = 1
-StatusTargetLabel.Font = CONFIG.FONTS.MONO
-StatusTargetLabel.Text = "Target: None | Active Features: 0"
-StatusTargetLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
-StatusTargetLabel.TextSize = 11
-StatusTargetLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusTargetLabel.Parent = StatusBar
-
-local StatusFeedbackLabel = Instance.new("TextLabel")
-StatusFeedbackLabel.Name = "StatusFeedback"
-StatusFeedbackLabel.Size = UDim2.new(1, -280, 1, 0)
-StatusFeedbackLabel.Position = UDim2.new(0, 270, 0, 0)
-StatusFeedbackLabel.BackgroundTransparency = 1
-StatusFeedbackLabel.Font = CONFIG.FONTS.BODY
-StatusFeedbackLabel.Text = state.statusMessage
-StatusFeedbackLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-StatusFeedbackLabel.TextSize = 11
-StatusFeedbackLabel.TextXAlignment = Enum.TextXAlignment.Right
-StatusFeedbackLabel.Parent = StatusBar
-
 local function countActiveFeatures(): number
 	local count = 0
 	if state.isFollowing then count += 1 end
@@ -1044,6 +482,12 @@ local function countActiveFeatures(): number
 	if state.isTouchFling then count += 1 end
 	if state.isOrbiting then count += 1 end
 	if state.isHeadSitting then count += 1 end
+	if state.isSpinbot then count += 1 end
+	if state.infiniteJump then count += 1 end
+	if state.bunnyHop then count += 1 end
+	if state.fullbright then count += 1 end
+	if state.antiVoid then count += 1 end
+	if state.antiAfk then count += 1 end
 	if state.currentFov ~= state.defaultFov then count += 1 end
 	if state.walkSpeed ~= state.defaultWalkSpeed then count += 1 end
 	return count
@@ -1062,9 +506,45 @@ local function updateStatusBar(msg: string?, statusType: string?)
 	elseif state.statusType == "Error" then
 		color = CONFIG.THEME.ERROR
 	end
-	StatusFeedbackLabel.Text = state.statusMessage
-	StatusFeedbackLabel.TextColor3 = color
-	StatusTargetLabel.Text = string.format("Target: %s | Active: %d", state.selectedPlayerName, countActiveFeatures())
+	if StatusFeedbackLabel then
+		StatusFeedbackLabel.Text = state.statusMessage
+		StatusFeedbackLabel.TextColor3 = color
+	end
+	if StatusTargetLabel then
+		StatusTargetLabel.Text = string.format("Target: %s | Active: %d", state.selectedPlayerName, countActiveFeatures())
+	end
+end
+
+local function recenterMainFrame()
+	if not MainFrame then return end
+	MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	if not state.manualScaleOverride and GuiScale then
+		local newScale = computeAutoFitScale()
+		state.guiScale = newScale
+		GuiScale.Scale = newScale
+	end
+	updateStatusBar("Interface centered to screen.", "Normal")
+end
+
+local function toggleVisibility()
+	if not state.isAuthenticated then
+		return
+	end
+	if not MainFrame then return end
+	if MainFrame.Visible or (MinimizedPill and MinimizedPill.Visible) then
+		MainFrame.Visible = false
+		if MinimizedPill then MinimizedPill.Visible = false end
+		updateStatusBar("Interface hidden. Tap floating button to reopen.", "Normal")
+	else
+		if state.isMinimized and MinimizedPill then
+			MinimizedPill.Visible = true
+		else
+			MainFrame.Visible = true
+			clampMainFrameToBounds()
+		end
+		updateStatusBar("Interface visible.", "Normal")
+	end
 end
 
 local function enableDragging(frame: GuiObject, handle: GuiObject)
@@ -1094,7 +574,7 @@ local function enableDragging(frame: GuiObject, handle: GuiObject)
 	trackConnection(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input == dragInput or input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
 			local delta = Vector2.new(input.Position.X, input.Position.Y) - dragStart
-			local scale = GuiScale.Scale
+			local scale = GuiScale and GuiScale.Scale or 1
 			if scale <= 0.1 then scale = 1 end
 
 			local newOffsetX = startPos.X.Offset + (delta.X / scale)
@@ -1129,69 +609,6 @@ local function enableDragging(frame: GuiObject, handle: GuiObject)
 		end
 	end))
 end
-
-enableDragging(MainFrame, TitleDragHandle)
-enableDragging(MinimizedPill, MinimizedPill)
-
-local mobileBtnDragging = false
-local mobileBtnStartPos = Vector2.zero
-local mobileBtnStartGuiPos = UDim2.new()
-local mobileBtnDragInput: InputObject? = nil
-local mobileBtnMoved = false
-
-trackConnection(MobileToggleButton.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		mobileBtnDragging = true
-		mobileBtnMoved = false
-		mobileBtnDragInput = input
-		mobileBtnStartPos = Vector2.new(input.Position.X, input.Position.Y)
-		mobileBtnStartGuiPos = MobileToggleButton.Position
-
-		local endedConn: RBXScriptConnection
-		endedConn = input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				mobileBtnDragging = false
-				mobileBtnDragInput = nil
-				endedConn:Disconnect()
-			end
-		end)
-	end
-end))
-
-trackConnection(UserInputService.InputChanged:Connect(function(input)
-	if mobileBtnDragging and (input == mobileBtnDragInput or input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-		local cur = Vector2.new(input.Position.X, input.Position.Y)
-		local delta = cur - mobileBtnStartPos
-		if delta.Magnitude > 6 then
-			mobileBtnMoved = true
-		end
-		local vp = getViewportSize()
-		local newX = math.clamp(mobileBtnStartGuiPos.X.Offset + delta.X, 4, vp.X - 52)
-		local newY = math.clamp(mobileBtnStartGuiPos.Y.Offset + delta.Y, 4, vp.Y - 52)
-		MobileToggleButton.Position = UDim2.new(mobileBtnStartGuiPos.X.Scale, newX, mobileBtnStartGuiPos.Y.Scale, newY)
-	end
-end))
-
-trackConnection(UserInputService.InputEnded:Connect(function(input)
-	if mobileBtnDragging and (input == mobileBtnDragInput or input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
-		mobileBtnDragging = false
-		mobileBtnDragInput = nil
-		if not mobileBtnMoved then
-			toggleVisibility()
-		end
-	end
-end))
-
-local lastTitleTapTime = 0
-trackConnection(TitleDragHandle.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		local now = os.clock()
-		if now - lastTitleTapTime < 0.35 then
-			recenterMainFrame()
-		end
-		lastTitleTapTime = now
-	end
-end))
 
 local function createBadge(parent: Instance, tagType: string): TextLabel
 	local badge = Instance.new("TextLabel")
@@ -1246,13 +663,12 @@ local function createCard(parent: Instance, title: string, subtitle: string?): (
 	cardLayout.Parent = card
 
 	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0, 20)
+	header.Size = UDim2.new(1, 0, 0, subtitle and 30 or 18)
 	header.BackgroundTransparency = 1
-	header.LayoutOrder = 1
 	header.Parent = card
 
 	local titleLabel = Instance.new("TextLabel")
-	titleLabel.Size = UDim2.new(1, 0, 1, 0)
+	titleLabel.Size = UDim2.new(1, 0, 0, 16)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Font = CONFIG.FONTS.HEADER
 	titleLabel.Text = title
@@ -1262,10 +678,9 @@ local function createCard(parent: Instance, title: string, subtitle: string?): (
 	titleLabel.Parent = header
 
 	if subtitle then
-		titleLabel.Size = UDim2.new(1, 0, 0, 14)
 		local subLabel = Instance.new("TextLabel")
 		subLabel.Size = UDim2.new(1, 0, 0, 12)
-		subLabel.Position = UDim2.new(0, 0, 0, 14)
+		subLabel.Position = UDim2.new(0, 0, 0, 16)
 		subLabel.BackgroundTransparency = 1
 		subLabel.Font = CONFIG.FONTS.BODY
 		subLabel.Text = subtitle
@@ -1273,45 +688,44 @@ local function createCard(parent: Instance, title: string, subtitle: string?): (
 		subLabel.TextSize = 10
 		subLabel.TextXAlignment = Enum.TextXAlignment.Left
 		subLabel.Parent = header
-		header.Size = UDim2.new(1, 0, 0, 28)
 	end
 
 	local content = Instance.new("Frame")
-	content.Name = "CardContent"
 	content.Size = UDim2.new(1, 0, 0, 0)
 	content.AutomaticSize = Enum.AutomaticSize.Y
 	content.BackgroundTransparency = 1
-	content.LayoutOrder = 2
 	content.Parent = card
 
-	local innerLayout = Instance.new("UIListLayout")
-	innerLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	innerLayout.Padding = UDim.new(0, 6)
-	innerLayout.Parent = content
+	local contentLayout = Instance.new("UIListLayout")
+	contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	contentLayout.Padding = UDim.new(0, 6)
+	contentLayout.Parent = content
 
 	return card, content
 end
 
-local function createActionButton(parent: Instance, labelText: string, tagType: string, callback: () -> ()): TextButton
-	local container = Instance.new("Frame")
-	container.Size = UDim2.new(1, 0, 0, 32)
-	container.BackgroundTransparency = 1
-	container.Parent = parent
-
+local function createActionButton(
+	parent: Instance,
+	labelText: string,
+	tagType: string,
+	callback: () -> ()
+): TextButton
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(1, -112, 1, 0)
+	btn.Size = UDim2.new(1, 0, 0, 32)
 	btn.BackgroundColor3 = CONFIG.THEME.SURFACE_ALT
+	btn.AutoButtonColor = false
 	btn.Font = CONFIG.FONTS.HEADER
-	btn.Text = labelText
+	btn.Text = "  " .. labelText
 	btn.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
 	btn.TextSize = 12
-	btn.Parent = container
+	btn.TextXAlignment = Enum.TextXAlignment.Left
+	btn.Parent = parent
 	createCorner(btn, 6)
 	createStroke(btn, CONFIG.THEME.BORDER, 1)
 
-	local badge = createBadge(container, tagType)
+	local badge = createBadge(btn, tagType)
 	badge.AnchorPoint = Vector2.new(1, 0.5)
-	badge.Position = UDim2.new(1, 0, 0.5, 0)
+	badge.Position = UDim2.new(1, -8, 0.5, 0)
 
 	trackConnection(btn.MouseEnter:Connect(function()
 		animateTween(btn, 0.15, { BackgroundColor3 = CONFIG.THEME.BORDER })
@@ -1324,7 +738,13 @@ local function createActionButton(parent: Instance, labelText: string, tagType: 
 	return btn
 end
 
-local function createToggle(parent: Instance, labelText: string, tagType: string, initialValue: boolean, callback: (boolean) -> ()): (Frame, (boolean) -> ())
+local function createToggle(
+	parent: Instance,
+	labelText: string,
+	tagType: string,
+	initialValue: boolean,
+	callback: (boolean) -> ()
+): (Frame, (boolean) -> ())
 	local container = Instance.new("Frame")
 	container.Size = UDim2.new(1, 0, 0, 32)
 	container.BackgroundTransparency = 1
@@ -1341,7 +761,8 @@ local function createToggle(parent: Instance, labelText: string, tagType: string
 	title.Parent = container
 
 	local badge = createBadge(container, tagType)
-	badge.Position = UDim2.new(1, -160, 0.5, -9)
+	badge.AnchorPoint = Vector2.new(1, 0.5)
+	badge.Position = UDim2.new(1, -54, 0.5, 0)
 
 	local toggleBtn = Instance.new("TextButton")
 	toggleBtn.Size = UDim2.new(0, 44, 0, 22)
@@ -1512,10 +933,6 @@ local function createSlider(
 	return container, setValue
 end
 
--- Tab navigation and content visibility logic:
-local pages: { [string]: Frame } = {}
-local tabButtons: { [string]: TextButton } = {}
-
 local function createPage(id: string): ScrollingFrame
 	local page = Instance.new("ScrollingFrame")
 	page.Name = "Page_" .. id
@@ -1544,20 +961,19 @@ end
 
 local function switchTab(id: string)
 	state.activeTab = id
-	for pageId, pageFrame in pairs(pages) do
-		pageFrame.Visible = (pageId == id)
-	end
 	for tabId, btn in pairs(tabButtons) do
-		local stroke = btn:FindFirstChildOfClass("UIStroke")
-		if tabId == id then
-			btn.BackgroundColor3 = CONFIG.THEME.SURFACE
-			btn.TextColor3 = state.accentColor
-			if stroke then stroke.Color = state.accentColor end
-		else
-			btn.BackgroundColor3 = CONFIG.THEME.INPUT_BG
-			btn.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
-			if stroke then stroke.Color = CONFIG.THEME.BORDER end
+		local isTarget = (tabId == id)
+		animateTween(btn, 0.15, {
+			BackgroundColor3 = isTarget and CONFIG.THEME.SURFACE_ALT or CONFIG.THEME.INPUT_BG,
+			TextColor3 = isTarget and state.accentColor or CONFIG.THEME.TEXT_SECONDARY,
+		})
+		local strk = btn:FindFirstChildOfClass("UIStroke")
+		if strk then
+			strk.Color = isTarget and state.accentColor or CONFIG.THEME.BORDER
 		end
+	end
+	for pageId, page in pairs(pages) do
+		page.Visible = (pageId == id)
 	end
 end
 
@@ -1580,26 +996,696 @@ local function createTabButton(id: string, label: string)
 	end))
 end
 
-createTabButton("PlayerTools", "Players")
-createTabButton("Troll", "Troll [FE]")
-createTabButton("Movement", "Movement")
-createTabButton("Visuals", "Visuals")
-createTabButton("Executor", "Executor")
-createTabButton("World", "World")
-createTabButton("Utility", "Utility")
-createTabButton("Settings", "Settings")
-createTabButton("Info", "Info")
+local function createInfoCard(parent: Instance, title: string, bodyText: string)
+	local _, content = createCard(parent, title)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	label.BackgroundTransparency = 1
+	label.Font = CONFIG.FONTS.BODY
+	label.Text = bodyText
+	label.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	label.TextSize = 11
+	label.TextWrapped = true
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = content
+end
 
-local PagePlayerTools = createPage("PlayerTools")
-local PageTroll = createPage("Troll")
-local PageMovement = createPage("Movement")
-local PageVisuals = createPage("Visuals")
-local PageExecutor = createPage("Executor")
-local PageWorld = createPage("World")
-local PageUtility = createPage("Utility")
-local PageSettings = createPage("Settings")
-local PageInfo = createPage("Info")
 
+
+local function buildCoreContainers()
+	ScreenGui = Instance.new("ScreenGui")
+	ScreenGui.Name = CONFIG.GUI_NAME
+	ScreenGui.ResetOnSpawn = false
+	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	ScreenGui.DisplayOrder = 10000
+	ScreenGui.IgnoreGuiInset = true
+
+	if typeof(syn) == "table" and typeof(syn.protect_gui) == "function" then
+		pcall(syn.protect_gui, ScreenGui)
+	end
+	ScreenGui.Parent = TargetParent
+
+	local initialScale = computeAutoFitScale()
+	state.guiScale = initialScale
+
+	GuiScale = Instance.new("UIScale")
+	GuiScale.Scale = state.guiScale
+	GuiScale.Parent = ScreenGui
+
+	MainFrame = Instance.new("Frame")
+	MainFrame.Name = "MainFrame"
+	MainFrame.Size = CONFIG.DIMENSIONS.WINDOW_SIZE
+	MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	MainFrame.BackgroundColor3 = CONFIG.THEME.BACKGROUND
+	MainFrame.BorderSizePixel = 0
+	MainFrame.ClipsDescendants = false
+	MainFrame.Active = true
+	MainFrame.Visible = false
+	MainFrame.Parent = ScreenGui
+	createCorner(MainFrame, 10)
+	createStroke(MainFrame, CONFIG.THEME.BORDER, 1)
+
+	MinimizedPill = Instance.new("Frame")
+	MinimizedPill.Name = "MinimizedPill"
+	MinimizedPill.Size = CONFIG.DIMENSIONS.MINIMIZED_SIZE
+	MinimizedPill.Position = UDim2.new(0.5, 0, 0.08, 0)
+	MinimizedPill.AnchorPoint = Vector2.new(0.5, 0)
+	MinimizedPill.BackgroundColor3 = CONFIG.THEME.SURFACE
+	MinimizedPill.BorderSizePixel = 0
+	MinimizedPill.Active = true
+	MinimizedPill.Visible = false
+	MinimizedPill.Parent = ScreenGui
+	createCorner(MinimizedPill, 18)
+	local pillStroke = createStroke(MinimizedPill, CONFIG.THEME.BORDER, 1)
+	registerAccent(pillStroke, "Color")
+
+	PillRestoreButton = Instance.new("TextButton")
+	PillRestoreButton.Size = UDim2.new(1, 0, 1, 0)
+	PillRestoreButton.BackgroundTransparency = 1
+	PillRestoreButton.Font = CONFIG.FONTS.HEADER
+	PillRestoreButton.Text = "Sentinel | Restore"
+	PillRestoreButton.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	PillRestoreButton.TextSize = 13
+	PillRestoreButton.Parent = MinimizedPill
+
+	MobileToggleButton = Instance.new("TextButton")
+	MobileToggleButton.Name = "MobileToggleButton"
+	MobileToggleButton.Size = CONFIG.DIMENSIONS.MOBILE_BTN_SIZE
+	MobileToggleButton.Position = UDim2.new(0, 16, 0.45, 0)
+	MobileToggleButton.AnchorPoint = Vector2.new(0, 0.5)
+	MobileToggleButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+	MobileToggleButton.BorderSizePixel = 0
+	MobileToggleButton.Font = CONFIG.FONTS.TITLE
+	MobileToggleButton.Text = "S"
+	MobileToggleButton.TextColor3 = state.accentColor
+	MobileToggleButton.TextSize = 22
+	MobileToggleButton.AutoButtonColor = false
+	MobileToggleButton.Active = true
+	MobileToggleButton.ZIndex = 250
+	MobileToggleButton.Visible = false
+	MobileToggleButton.Parent = ScreenGui
+	createCorner(MobileToggleButton, 23)
+	local mobileStroke = createStroke(MobileToggleButton, state.accentColor, 1.5)
+	registerAccent(mobileStroke, "Color")
+	registerAccent(MobileToggleButton, "TextColor3")
+
+	local TitleBar = Instance.new("Frame")
+	TitleBar.Name = "TitleBar"
+	TitleBar.Size = UDim2.new(1, 0, 0, 38)
+	TitleBar.BackgroundColor3 = CONFIG.THEME.SURFACE
+	TitleBar.BorderSizePixel = 0
+	TitleBar.Parent = MainFrame
+	createCorner(TitleBar, 10)
+
+	local TitleBarCover = Instance.new("Frame")
+	TitleBarCover.Size = UDim2.new(1, 0, 0, 8)
+	TitleBarCover.Position = UDim2.new(0, 0, 1, -8)
+	TitleBarCover.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	TitleBarCover.BorderSizePixel = 0
+	TitleBarCover.Parent = TitleBar
+
+	local AccentBar = Instance.new("Frame")
+	AccentBar.Name = "AccentBar"
+	AccentBar.Size = UDim2.new(1, 0, 0, 2)
+	AccentBar.Position = UDim2.new(0, 0, 1, -2)
+	AccentBar.BorderSizePixel = 0
+	AccentBar.Parent = TitleBar
+	registerAccent(AccentBar, "BackgroundColor3")
+
+	local TitleLabel = Instance.new("TextLabel")
+	TitleLabel.Text = "SENTINEL"
+	TitleLabel.Font = CONFIG.FONTS.TITLE
+	TitleLabel.TextSize = 15
+	TitleLabel.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TitleLabel.BackgroundTransparency = 1
+	TitleLabel.Position = UDim2.new(0, 14, 0, 0)
+	TitleLabel.Size = UDim2.new(0, 80, 1, 0)
+	TitleLabel.Parent = TitleBar
+
+	local TagLabel = Instance.new("TextLabel")
+	TagLabel.Text = string.format("CLIENT UTILITY [FE] | %s", detectedExecutor ~= "Unknown" and detectedExecutor or (isMobileDevice and "Mobile" or "Desktop"))
+	TagLabel.Font = CONFIG.FONTS.MONO
+	TagLabel.TextSize = 10
+	TagLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	TagLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TagLabel.BackgroundTransparency = 1
+	TagLabel.Position = UDim2.new(0, 96, 0, 0)
+	TagLabel.Size = UDim2.new(0, 160, 1, 0)
+	TagLabel.Parent = TitleBar
+
+	TitleDragHandle = Instance.new("Frame")
+	TitleDragHandle.Name = "DragHandle"
+	TitleDragHandle.Size = UDim2.new(1, -76, 1, 0)
+	TitleDragHandle.Position = UDim2.new(0, 0, 0, 0)
+	TitleDragHandle.BackgroundTransparency = 1
+	TitleDragHandle.Parent = TitleBar
+
+	MinimizeButton = Instance.new("TextButton")
+	MinimizeButton.Name = "MinimizeButton"
+	MinimizeButton.Size = UDim2.new(0, 28, 0, 26)
+	MinimizeButton.Position = UDim2.new(1, -64, 0, 6)
+	MinimizeButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+	MinimizeButton.Font = CONFIG.FONTS.HEADER
+	MinimizeButton.Text = "-"
+	MinimizeButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	MinimizeButton.TextSize = 14
+	MinimizeButton.Parent = TitleBar
+	createCorner(MinimizeButton, 6)
+	createStroke(MinimizeButton, CONFIG.THEME.BORDER, 1)
+
+	CloseButton = Instance.new("TextButton")
+	CloseButton.Name = "CloseButton"
+	CloseButton.Size = UDim2.new(0, 28, 0, 26)
+	CloseButton.Position = UDim2.new(1, -34, 0, 6)
+	CloseButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+	CloseButton.Font = CONFIG.FONTS.HEADER
+	CloseButton.Text = "X"
+	CloseButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	CloseButton.TextSize = 12
+	CloseButton.Parent = TitleBar
+	createCorner(CloseButton, 6)
+	createStroke(CloseButton, CONFIG.THEME.BORDER, 1)
+
+	TabBar = Instance.new("ScrollingFrame")
+	TabBar.Name = "TabBar"
+	TabBar.Size = UDim2.new(1, -24, 0, 32)
+	TabBar.Position = UDim2.new(0, 12, 0, 46)
+	TabBar.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	TabBar.BorderSizePixel = 0
+	TabBar.ScrollBarThickness = 0
+	TabBar.ScrollingDirection = Enum.ScrollingDirection.X
+	TabBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+	TabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+	TabBar.Parent = MainFrame
+	createCorner(TabBar, 6)
+	createStroke(TabBar, CONFIG.THEME.BORDER, 1)
+
+	local TabBarLayout = Instance.new("UIListLayout")
+	TabBarLayout.FillDirection = Enum.FillDirection.Horizontal
+	TabBarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	TabBarLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	TabBarLayout.Padding = UDim.new(0, 4)
+	TabBarLayout.Parent = TabBar
+
+	local TabBarPadding = Instance.new("UIPadding")
+	TabBarPadding.PaddingLeft = UDim.new(0, 4)
+	TabBarPadding.PaddingRight = UDim.new(0, 4)
+	TabBarPadding.Parent = TabBar
+
+	ContentViewport = Instance.new("Frame")
+	ContentViewport.Name = "ContentViewport"
+	ContentViewport.Size = UDim2.new(1, -24, 1, -118)
+	ContentViewport.Position = UDim2.new(0, 12, 0, 84)
+	ContentViewport.BackgroundTransparency = 1
+	ContentViewport.Parent = MainFrame
+
+	StatusBar = Instance.new("Frame")
+	StatusBar.Name = "StatusBar"
+	StatusBar.Size = UDim2.new(1, 0, 0, 28)
+	StatusBar.Position = UDim2.new(0, 0, 1, -28)
+	StatusBar.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	StatusBar.BorderSizePixel = 0
+	StatusBar.Parent = MainFrame
+	createCorner(StatusBar, 10)
+
+	local StatusBarCover = Instance.new("Frame")
+	StatusBarCover.Size = UDim2.new(1, 0, 0, 8)
+	StatusBarCover.Position = UDim2.new(0, 0, 0, 0)
+	StatusBarCover.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	StatusBarCover.BorderSizePixel = 0
+	StatusBarCover.Parent = StatusBar
+
+	local StatusSeparator = Instance.new("Frame")
+	StatusSeparator.Size = UDim2.new(1, 0, 0, 1)
+	StatusSeparator.Position = UDim2.new(0, 0, 0, 0)
+	StatusSeparator.BackgroundColor3 = CONFIG.THEME.BORDER
+	StatusSeparator.BorderSizePixel = 0
+	StatusSeparator.Parent = StatusBar
+
+	StatusTargetLabel = Instance.new("TextLabel")
+	StatusTargetLabel.Name = "StatusTarget"
+	StatusTargetLabel.Size = UDim2.new(0, 260, 1, 0)
+	StatusTargetLabel.Position = UDim2.new(0, 12, 0, 0)
+	StatusTargetLabel.BackgroundTransparency = 1
+	StatusTargetLabel.Font = CONFIG.FONTS.MONO
+	StatusTargetLabel.Text = "Target: None | Active: 0"
+	StatusTargetLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	StatusTargetLabel.TextSize = 11
+	StatusTargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+	StatusTargetLabel.Parent = StatusBar
+
+	StatusFeedbackLabel = Instance.new("TextLabel")
+	StatusFeedbackLabel.Name = "StatusFeedback"
+	StatusFeedbackLabel.Size = UDim2.new(1, -280, 1, 0)
+	StatusFeedbackLabel.Position = UDim2.new(0, 270, 0, 0)
+	StatusFeedbackLabel.BackgroundTransparency = 1
+	StatusFeedbackLabel.Font = CONFIG.FONTS.BODY
+	StatusFeedbackLabel.Text = state.statusMessage
+	StatusFeedbackLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	StatusFeedbackLabel.TextSize = 11
+	StatusFeedbackLabel.TextXAlignment = Enum.TextXAlignment.Right
+	StatusFeedbackLabel.Parent = StatusBar
+
+	enableDragging(MainFrame, TitleDragHandle)
+	enableDragging(MinimizedPill, MinimizedPill)
+
+	local mobileBtnDragging = false
+	local mobileBtnStartPos = Vector2.zero
+	local mobileBtnStartGuiPos = UDim2.new()
+	local mobileBtnDragInput: InputObject? = nil
+	local mobileBtnMoved = false
+
+	trackConnection(MobileToggleButton.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			mobileBtnDragging = true
+			mobileBtnMoved = false
+			mobileBtnDragInput = input
+			mobileBtnStartPos = Vector2.new(input.Position.X, input.Position.Y)
+			mobileBtnStartGuiPos = MobileToggleButton.Position
+
+			local endedConn: RBXScriptConnection
+			endedConn = input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					mobileBtnDragging = false
+					mobileBtnDragInput = nil
+					endedConn:Disconnect()
+				end
+			end)
+		end
+	end))
+
+	trackConnection(UserInputService.InputChanged:Connect(function(input)
+		if mobileBtnDragging and (input == mobileBtnDragInput or input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+			local cur = Vector2.new(input.Position.X, input.Position.Y)
+			local delta = cur - mobileBtnStartPos
+			if delta.Magnitude > 6 then
+				mobileBtnMoved = true
+			end
+			local vp = getViewportSize()
+			local newX = math.clamp(mobileBtnStartGuiPos.X.Offset + delta.X, 4, vp.X - 52)
+			local newY = math.clamp(mobileBtnStartGuiPos.Y.Offset + delta.Y, 4, vp.Y - 52)
+			MobileToggleButton.Position = UDim2.new(mobileBtnStartGuiPos.X.Scale, newX, mobileBtnStartGuiPos.Y.Scale, newY)
+		end
+	end))
+
+	trackConnection(UserInputService.InputEnded:Connect(function(input)
+		if mobileBtnDragging and (input == mobileBtnDragInput or input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+			mobileBtnDragging = false
+			mobileBtnDragInput = nil
+			if not mobileBtnMoved then
+				toggleVisibility()
+			end
+		end
+	end))
+
+	local lastTitleTapTime = 0
+	trackConnection(TitleDragHandle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			local now = os.clock()
+			if now - lastTitleTapTime < 0.35 then
+				recenterMainFrame()
+			end
+			lastTitleTapTime = now
+		end
+	end))
+
+	createTabButton("PlayerTools", "Players")
+	createTabButton("Troll", "Troll [FE]")
+	createTabButton("Movement", "Movement")
+	createTabButton("Visuals", "Visuals")
+	createTabButton("Executor", "Executor")
+	createTabButton("World", "World")
+	createTabButton("Utility", "Utility")
+	createTabButton("Settings", "Settings")
+	createTabButton("Info", "Info")
+
+	PagePlayerTools = createPage("PlayerTools")
+	PageTroll = createPage("Troll")
+	PageMovement = createPage("Movement")
+	PageVisuals = createPage("Visuals")
+	PageExecutor = createPage("Executor")
+	PageWorld = createPage("World")
+	PageUtility = createPage("Utility")
+	PageSettings = createPage("Settings")
+	PageInfo = createPage("Info")
+end
+
+
+
+local function buildAuthAndLoading()
+	local LoadingModal = Instance.new("Frame")
+	LoadingModal.Name = "Sentinel_LoadingModal"
+	LoadingModal.Size = UDim2.new(0, 360, 0, 180)
+	LoadingModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+	LoadingModal.AnchorPoint = Vector2.new(0.5, 0.5)
+	LoadingModal.BackgroundColor3 = CONFIG.THEME.BACKGROUND
+	LoadingModal.BorderSizePixel = 0
+	LoadingModal.Active = true
+	LoadingModal.ZIndex = 500
+	LoadingModal.Parent = ScreenGui
+	createCorner(LoadingModal, 12)
+	local loadingStroke = createStroke(LoadingModal, CONFIG.THEME.BORDER, 1.5)
+	registerAccent(loadingStroke, "Color")
+
+	local LoadingTitle = Instance.new("TextLabel")
+	LoadingTitle.Size = UDim2.new(1, -24, 0, 24)
+	LoadingTitle.Position = UDim2.new(0, 12, 0, 18)
+	LoadingTitle.BackgroundTransparency = 1
+	LoadingTitle.Font = CONFIG.FONTS.TITLE
+	LoadingTitle.Text = "SENTINEL"
+	LoadingTitle.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	LoadingTitle.TextSize = 18
+	LoadingTitle.TextXAlignment = Enum.TextXAlignment.Center
+	LoadingTitle.ZIndex = 501
+	LoadingTitle.Parent = LoadingModal
+
+	local LoadingSubtitle = Instance.new("TextLabel")
+	LoadingSubtitle.Size = UDim2.new(1, -24, 0, 16)
+	LoadingSubtitle.Position = UDim2.new(0, 12, 0, 44)
+	LoadingSubtitle.BackgroundTransparency = 1
+	LoadingSubtitle.Font = CONFIG.FONTS.MONO
+	LoadingSubtitle.Text = "MODULAR CLIENT SUITE | v" .. CONFIG.VERSION
+	LoadingSubtitle.TextColor3 = state.accentColor
+	LoadingSubtitle.TextSize = 10
+	LoadingSubtitle.TextXAlignment = Enum.TextXAlignment.Center
+	LoadingSubtitle.ZIndex = 501
+	LoadingSubtitle.Parent = LoadingModal
+	registerAccent(LoadingSubtitle, "TextColor3")
+
+	local LoadingStatus = Instance.new("TextLabel")
+	LoadingStatus.Size = UDim2.new(1, -32, 0, 18)
+	LoadingStatus.Position = UDim2.new(0, 16, 0, 85)
+	LoadingStatus.BackgroundTransparency = 1
+	LoadingStatus.Font = CONFIG.FONTS.BODY
+	LoadingStatus.Text = "Initializing engine hooks..."
+	LoadingStatus.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	LoadingStatus.TextSize = 11
+	LoadingStatus.TextXAlignment = Enum.TextXAlignment.Left
+	LoadingStatus.ZIndex = 501
+	LoadingStatus.Parent = LoadingModal
+
+	local ProgressBarTrack = Instance.new("Frame")
+	ProgressBarTrack.Size = UDim2.new(1, -32, 0, 8)
+	ProgressBarTrack.Position = UDim2.new(0, 16, 0, 110)
+	ProgressBarTrack.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	ProgressBarTrack.BorderSizePixel = 0
+	ProgressBarTrack.ZIndex = 501
+	ProgressBarTrack.Parent = LoadingModal
+	createCorner(ProgressBarTrack, 4)
+	createStroke(ProgressBarTrack, CONFIG.THEME.BORDER, 1)
+
+	local ProgressBarFill = Instance.new("Frame")
+	ProgressBarFill.Size = UDim2.new(0, 0, 1, 0)
+	ProgressBarFill.BackgroundColor3 = state.accentColor
+	ProgressBarFill.BorderSizePixel = 0
+	ProgressBarFill.ZIndex = 502
+	ProgressBarFill.Parent = ProgressBarTrack
+	createCorner(ProgressBarFill, 4)
+	registerAccent(ProgressBarFill, "BackgroundColor3")
+
+	local LoadingFooter = Instance.new("TextLabel")
+	LoadingFooter.Size = UDim2.new(1, -32, 0, 14)
+	LoadingFooter.Position = UDim2.new(0, 16, 0, 134)
+	LoadingFooter.BackgroundTransparency = 1
+	LoadingFooter.Font = CONFIG.FONTS.MONO
+	LoadingFooter.Text = "Delta & Mobile Protected Runtime"
+	LoadingFooter.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	LoadingFooter.TextSize = 9
+	LoadingFooter.TextXAlignment = Enum.TextXAlignment.Center
+	LoadingFooter.ZIndex = 501
+	LoadingFooter.Parent = LoadingModal
+
+	local KeyCenterModal = Instance.new("Frame")
+	KeyCenterModal.Name = "Sentinel_KeyCenter"
+	KeyCenterModal.Size = UDim2.new(0, 380, 0, 310)
+	KeyCenterModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+	KeyCenterModal.AnchorPoint = Vector2.new(0.5, 0.5)
+	KeyCenterModal.BackgroundColor3 = CONFIG.THEME.BACKGROUND
+	KeyCenterModal.BorderSizePixel = 0
+	KeyCenterModal.Active = true
+	KeyCenterModal.Visible = false
+	KeyCenterModal.ZIndex = 500
+	KeyCenterModal.Parent = ScreenGui
+	createCorner(KeyCenterModal, 12)
+	local keyStroke = createStroke(KeyCenterModal, CONFIG.THEME.BORDER, 1.5)
+	registerAccent(keyStroke, "Color")
+
+	local KeyHeader = Instance.new("Frame")
+	KeyHeader.Size = UDim2.new(1, 0, 0, 48)
+	KeyHeader.BackgroundColor3 = CONFIG.THEME.SURFACE
+	KeyHeader.BorderSizePixel = 0
+	KeyHeader.ZIndex = 501
+	KeyHeader.Parent = KeyCenterModal
+	createCorner(KeyHeader, 12)
+
+	local KeyHeaderCover = Instance.new("Frame")
+	KeyHeaderCover.Size = UDim2.new(1, 0, 0, 10)
+	KeyHeaderCover.Position = UDim2.new(0, 0, 1, -10)
+	KeyHeaderCover.BackgroundColor3 = CONFIG.THEME.SURFACE
+	KeyHeaderCover.BorderSizePixel = 0
+	KeyHeaderCover.ZIndex = 501
+	KeyHeaderCover.Parent = KeyHeader
+
+	local KeyTitle = Instance.new("TextLabel")
+	KeyTitle.Size = UDim2.new(1, -24, 0, 20)
+	KeyTitle.Position = UDim2.new(0, 12, 0, 8)
+	KeyTitle.BackgroundTransparency = 1
+	KeyTitle.Font = CONFIG.FONTS.TITLE
+	KeyTitle.Text = "SENTINEL | ACCESS GATEWAY"
+	KeyTitle.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	KeyTitle.TextSize = 13
+	KeyTitle.TextXAlignment = Enum.TextXAlignment.Left
+	KeyTitle.ZIndex = 502
+	KeyTitle.Parent = KeyHeader
+
+	local KeySubtitle = Instance.new("TextLabel")
+	KeySubtitle.Size = UDim2.new(1, -24, 0, 14)
+	KeySubtitle.Position = UDim2.new(0, 12, 0, 28)
+	KeySubtitle.BackgroundTransparency = 1
+	KeySubtitle.Font = CONFIG.FONTS.MONO
+	KeySubtitle.Text = "AUTHENTICATION REQUIRED"
+	KeySubtitle.TextColor3 = state.accentColor
+	KeySubtitle.TextSize = 10
+	KeySubtitle.TextXAlignment = Enum.TextXAlignment.Left
+	KeySubtitle.ZIndex = 502
+	KeySubtitle.Parent = KeyHeader
+	registerAccent(KeySubtitle, "TextColor3")
+
+	local UserLabel = Instance.new("TextLabel")
+	UserLabel.Size = UDim2.new(1, -32, 0, 14)
+	UserLabel.Position = UDim2.new(0, 16, 0, 58)
+	UserLabel.BackgroundTransparency = 1
+	UserLabel.Font = CONFIG.FONTS.HEADER
+	UserLabel.Text = "ACCOUNT USERNAME"
+	UserLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	UserLabel.TextSize = 10
+	UserLabel.TextXAlignment = Enum.TextXAlignment.Left
+	UserLabel.ZIndex = 501
+	UserLabel.Parent = KeyCenterModal
+
+	local UserBoxContainer = Instance.new("Frame")
+	UserBoxContainer.Size = UDim2.new(1, -32, 0, 34)
+	UserBoxContainer.Position = UDim2.new(0, 16, 0, 76)
+	UserBoxContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	UserBoxContainer.BorderSizePixel = 0
+	UserBoxContainer.ZIndex = 501
+	UserBoxContainer.Parent = KeyCenterModal
+	createCorner(UserBoxContainer, 6)
+	createStroke(UserBoxContainer, CONFIG.THEME.BORDER, 1)
+
+	local UserInputBox = Instance.new("TextBox")
+	UserInputBox.Size = UDim2.new(1, -16, 1, 0)
+	UserInputBox.Position = UDim2.new(0, 8, 0, 0)
+	UserInputBox.BackgroundTransparency = 1
+	UserInputBox.Font = CONFIG.FONTS.MONO
+	UserInputBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
+	UserInputBox.PlaceholderText = "Enter Username..."
+	UserInputBox.Text = ""
+	UserInputBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	UserInputBox.TextSize = 11
+	UserInputBox.ClearTextOnFocus = false
+	UserInputBox.TextXAlignment = Enum.TextXAlignment.Left
+	UserInputBox.ZIndex = 502
+	UserInputBox.Parent = UserBoxContainer
+
+	local PassLabel = Instance.new("TextLabel")
+	PassLabel.Size = UDim2.new(1, -32, 0, 14)
+	PassLabel.Position = UDim2.new(0, 16, 0, 118)
+	PassLabel.BackgroundTransparency = 1
+	PassLabel.Font = CONFIG.FONTS.HEADER
+	PassLabel.Text = "SECURITY PASSWORD"
+	PassLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	PassLabel.TextSize = 10
+	PassLabel.TextXAlignment = Enum.TextXAlignment.Left
+	PassLabel.ZIndex = 501
+	PassLabel.Parent = KeyCenterModal
+
+	local PassBoxContainer = Instance.new("Frame")
+	PassBoxContainer.Size = UDim2.new(1, -32, 0, 34)
+	PassBoxContainer.Position = UDim2.new(0, 16, 0, 136)
+	PassBoxContainer.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	PassBoxContainer.BorderSizePixel = 0
+	PassBoxContainer.ZIndex = 501
+	PassBoxContainer.Parent = KeyCenterModal
+	createCorner(PassBoxContainer, 6)
+	createStroke(PassBoxContainer, CONFIG.THEME.BORDER, 1)
+
+	local PassInputBox = Instance.new("TextBox")
+	PassInputBox.Size = UDim2.new(1, -16, 1, 0)
+	PassInputBox.Position = UDim2.new(0, 8, 0, 0)
+	PassInputBox.BackgroundTransparency = 1
+	PassInputBox.Font = CONFIG.FONTS.MONO
+	PassInputBox.PlaceholderColor3 = CONFIG.THEME.TEXT_MUTED
+	PassInputBox.PlaceholderText = "Enter Password..."
+	PassInputBox.Text = ""
+	PassInputBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+	PassInputBox.TextSize = 11
+	PassInputBox.ClearTextOnFocus = false
+	PassInputBox.TextXAlignment = Enum.TextXAlignment.Left
+	PassInputBox.ZIndex = 502
+	PassInputBox.Parent = PassBoxContainer
+
+	local AuthStatusLabel = Instance.new("TextLabel")
+	AuthStatusLabel.Size = UDim2.new(1, -32, 0, 16)
+	AuthStatusLabel.Position = UDim2.new(0, 16, 0, 178)
+	AuthStatusLabel.BackgroundTransparency = 1
+	AuthStatusLabel.Font = CONFIG.FONTS.MONO
+	AuthStatusLabel.Text = "Status: Awaiting credentials"
+	AuthStatusLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	AuthStatusLabel.TextSize = 10
+	AuthStatusLabel.TextXAlignment = Enum.TextXAlignment.Center
+	AuthStatusLabel.ZIndex = 501
+	AuthStatusLabel.Parent = KeyCenterModal
+
+	local AuthButtonRow = Instance.new("Frame")
+	AuthButtonRow.Size = UDim2.new(1, -32, 0, 36)
+	AuthButtonRow.Position = UDim2.new(0, 16, 0, 202)
+	AuthButtonRow.BackgroundTransparency = 1
+	AuthButtonRow.ZIndex = 501
+	AuthButtonRow.Parent = KeyCenterModal
+
+	local AuthSubmitButton = Instance.new("TextButton")
+	AuthSubmitButton.Size = UDim2.new(0.68, 0, 1, 0)
+	AuthSubmitButton.Position = UDim2.new(0, 0, 0, 0)
+	AuthSubmitButton.BackgroundColor3 = CONFIG.THEME.SURFACE_ALT
+	AuthSubmitButton.Font = CONFIG.FONTS.HEADER
+	AuthSubmitButton.Text = "Verify & Unlock"
+	AuthSubmitButton.TextColor3 = state.accentColor
+	AuthSubmitButton.TextSize = 12
+	AuthSubmitButton.ZIndex = 502
+	AuthSubmitButton.Parent = AuthButtonRow
+	createCorner(AuthSubmitButton, 6)
+	local submitStroke = createStroke(AuthSubmitButton, state.accentColor, 1)
+	registerAccent(submitStroke, "Color")
+	registerAccent(AuthSubmitButton, "TextColor3")
+
+	local AuthClearButton = Instance.new("TextButton")
+	AuthClearButton.Size = UDim2.new(0.28, 0, 1, 0)
+	AuthClearButton.Position = UDim2.new(0.72, 0, 0, 0)
+	AuthClearButton.BackgroundColor3 = CONFIG.THEME.INPUT_BG
+	AuthClearButton.Font = CONFIG.FONTS.HEADER
+	AuthClearButton.Text = "Clear"
+	AuthClearButton.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+	AuthClearButton.TextSize = 11
+	AuthClearButton.ZIndex = 502
+	AuthClearButton.Parent = AuthButtonRow
+	createCorner(AuthClearButton, 6)
+	createStroke(AuthClearButton, CONFIG.THEME.BORDER, 1)
+
+	local QuickFillButton = Instance.new("TextButton")
+	QuickFillButton.Size = UDim2.new(1, -32, 0, 28)
+	QuickFillButton.Position = UDim2.new(0, 16, 0, 246)
+	QuickFillButton.BackgroundColor3 = CONFIG.THEME.SURFACE
+	QuickFillButton.Font = CONFIG.FONTS.MONO
+	QuickFillButton.Text = "Auto-Fill Authorized Key (Quick Access)"
+	QuickFillButton.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	QuickFillButton.TextSize = 10
+	QuickFillButton.ZIndex = 502
+	QuickFillButton.Parent = KeyCenterModal
+	createCorner(QuickFillButton, 6)
+	createStroke(QuickFillButton, CONFIG.THEME.BORDER, 1)
+
+	task.spawn(function()
+		local stages = {
+			{ pct = 0.25, msg = "Loading core services & camera..." },
+			{ pct = 0.55, msg = "Initializing troll collision & flight engines..." },
+			{ pct = 0.85, msg = "Mounting universal loadstring runtime..." },
+			{ pct = 1.00, msg = "Launching Sentinel Key Center..." },
+		}
+		for _, stage in ipairs(stages) do
+			task.wait(0.35)
+			LoadingStatus.Text = stage.msg
+			animateTween(ProgressBarFill, 0.3, { Size = UDim2.new(stage.pct, 0, 1, 0) })
+		end
+		task.wait(0.3)
+		LoadingModal.Visible = false
+		LoadingModal:Destroy()
+		KeyCenterModal.Visible = true
+	end)
+
+	local function attemptUnlock()
+		local enteredUser = UserInputBox.Text:gsub("^%s*(.-)%s*$", "%1")
+		local enteredPass = PassInputBox.Text:gsub("^%s*(.-)%s*$", "%1")
+
+		if enteredUser == CONFIG.AUTH.VALID_USER and enteredPass == CONFIG.AUTH.VALID_PASS then
+			state.isAuthenticated = true
+			AuthStatusLabel.Text = "[Access Granted] Verified! Launching Sentinel..."
+			AuthStatusLabel.TextColor3 = CONFIG.THEME.SUCCESS
+			keyStroke.Color = CONFIG.THEME.SUCCESS
+
+			task.wait(0.5)
+			KeyCenterModal:Destroy()
+
+			MainFrame.Visible = true
+			MobileToggleButton.Visible = state.showMobileButton
+			clampMainFrameToBounds()
+			updateStatusBar("Authentication verified. Welcome to Sentinel Suite!", "Success")
+		else
+			AuthStatusLabel.Text = "[Access Denied] Invalid username or password."
+			AuthStatusLabel.TextColor3 = CONFIG.THEME.ERROR
+			keyStroke.Color = CONFIG.THEME.ERROR
+			task.delay(1.5, function()
+				if keyStroke and keyStroke.Parent then
+					keyStroke.Color = CONFIG.THEME.BORDER
+				end
+			end)
+		end
+	end
+
+	trackConnection(AuthSubmitButton.Activated:Connect(attemptUnlock))
+
+	trackConnection(AuthClearButton.Activated:Connect(function()
+		UserInputBox.Text = ""
+		PassInputBox.Text = ""
+		AuthStatusLabel.Text = "Status: Input cleared."
+		AuthStatusLabel.TextColor3 = CONFIG.THEME.TEXT_MUTED
+	end))
+
+	trackConnection(QuickFillButton.Activated:Connect(function()
+		UserInputBox.Text = CONFIG.AUTH.VALID_USER
+		PassInputBox.Text = CONFIG.AUTH.VALID_PASS
+		AuthStatusLabel.Text = "Credentials populated. Tap 'Verify & Unlock' to proceed."
+		AuthStatusLabel.TextColor3 = state.accentColor
+	end))
+
+	trackConnection(UserInputBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			PassInputBox:CaptureFocus()
+		end
+	end))
+
+	trackConnection(PassInputBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			attemptUnlock()
+		end
+	end))
+end
+
+
+local function buildPlayerToolsTab(PagePlayerTools: ScrollingFrame)
 -- SECTION 5: PLAYER SELECTION & INSPECTION LOGIC
 local PlayerSplitFrame = Instance.new("Frame")
 PlayerSplitFrame.Size = UDim2.new(1, 0, 0, 310)
@@ -1706,7 +1792,7 @@ TargetHealthRow.Parent = TargetCardContent
 
 local playerRowButtons: { [Player]: TextButton } = {}
 
-local function updateTargetCard()
+updateTargetCard = function()
 	if not state.selectedPlayer or not state.selectedPlayer.Parent then
 		state.selectedPlayer = nil
 		state.selectedPlayerName = "None"
@@ -2040,7 +2126,12 @@ local _, setVisualToggle = createToggle(FollowCardContent, "Local Follow Target"
 	end
 end)
 setFollowVisual = setVisualToggle
+end
 
+local function buildTrollTab(PageTroll: ScrollingFrame)
+end
+
+local function buildTrollTab(PageTroll: ScrollingFrame)
 -- TROLL TAB (FE COMPATIBLE COLLISION & HARASSMENT MECHANICS)
 local _, FlingCardContent = createCard(PageTroll, "Target Collision Fling [FE]", "Launches target via networked physics collision impulse")
 
@@ -2065,7 +2156,7 @@ end)
 
 local flingHeartbeatConn: RBXScriptConnection? = nil
 
-local function abortFling()
+abortFling = function()
 	state.isFlinging = false
 	if flingHeartbeatConn then
 		flingHeartbeatConn:Disconnect()
@@ -2161,7 +2252,7 @@ end)
 local _, AuraCardContent = createCard(PageTroll, "Touch Fling Aura [FE]", "Infuses character with continuous collision repulsion")
 local touchFlingConn: RBXScriptConnection? = nil
 
-local function stopTouchFling()
+stopTouchFling = function()
 	state.isTouchFling = false
 	if touchFlingConn then
 		touchFlingConn:Disconnect()
@@ -2217,7 +2308,7 @@ end)
 local orbitConn: RBXScriptConnection? = nil
 local orbitAngle = 0
 
-local function stopOrbit()
+stopOrbit = function()
 	state.isOrbiting = false
 	if orbitConn then
 		orbitConn:Disconnect()
@@ -2260,7 +2351,7 @@ local function startOrbit()
 	updateStatusBar(string.format("Orbiting target %s [Replicated movement].", state.selectedPlayerName), "Success")
 end
 
-local setOrbitVisual: ((boolean) -> ())? = nil
+
 local _, setOrbitToggle = createToggle(KinematicCardContent, "Orbit Selected Player", CONFIG.AVAILABILITY.EXPERIENCE, state.isOrbiting, function(enabled)
 	if enabled then
 		if not state.selectedPlayer or not state.selectedPlayer.Parent then
@@ -2278,7 +2369,7 @@ setOrbitVisual = setOrbitToggle
 
 local headSitConn: RBXScriptConnection? = nil
 
-local function stopHeadSit()
+stopHeadSit = function()
 	state.isHeadSitting = false
 	if headSitConn then
 		headSitConn:Disconnect()
@@ -2323,7 +2414,7 @@ local function startHeadSit()
 	updateStatusBar(string.format("Head Sit active on %s [Replicated movement].", state.selectedPlayerName), "Success")
 end
 
-local setHeadSitVisual: ((boolean) -> ())? = nil
+
 local _, setHeadSitToggle = createToggle(KinematicCardContent, "Head Sit / Attach", CONFIG.AVAILABILITY.EXPERIENCE, state.isHeadSitting, function(enabled)
 	if enabled then
 		if not state.selectedPlayer or not state.selectedPlayer.Parent then
@@ -2373,7 +2464,12 @@ local function toggleSpinbot(enabled: boolean)
 	end
 end
 createToggle(SpinCardContent, "Toggle FE Spinbot", CONFIG.AVAILABILITY.COLLISION, state.isSpinbot, toggleSpinbot)
+end
 
+local function buildMovementTab(PageMovement: ScrollingFrame)
+end
+
+local function buildMovementTab(PageMovement: ScrollingFrame)
 -- MOVEMENT TAB
 local _, WalkCardContent = createCard(PageMovement, "Walk Speed Adjustment", "Local Humanoid walk speed modification")
 local _, setWalkSlider = createSlider(WalkCardContent, "Walk Speed", 0, 120, state.walkSpeed, 1, "studs/s", function(val)
@@ -2620,7 +2716,7 @@ local flightVelocity: BodyVelocity? = nil
 local flightGyro: BodyGyro? = nil
 local flightConnection: RBXScriptConnection? = nil
 
-local function stopFlight()
+stopFlight = function()
 	state.isFlying = false
 	if flightConnection then
 		flightConnection:Disconnect()
@@ -2725,7 +2821,7 @@ end)
 local _, NoclipCardContent = createCard(PageMovement, "Local Noclip Testing", "Client collision bypass for map diagnostics")
 local noclipConnection: RBXScriptConnection? = nil
 
-local function stopNoclip()
+stopNoclip = function()
 	state.isNoclipping = false
 	if noclipConnection then
 		noclipConnection:Disconnect()
@@ -2795,7 +2891,12 @@ FeatureRegistry.CharacterReset = {
 	execute = executeCharacterReset,
 }
 createActionButton(ResetCardContent, FeatureRegistry.CharacterReset.label, FeatureRegistry.CharacterReset.availability, executeCharacterReset)
+end
 
+local function buildVisualsTab(PageVisuals: ScrollingFrame)
+end
+
+local function buildVisualsTab(PageVisuals: ScrollingFrame)
 -- VISUALS TAB
 local _, TransCardContent = createCard(PageVisuals, "Character Ghosting / Transparency", "Local client character mesh visibility test")
 local _, setTransSlider = createSlider(TransCardContent, "Transparency", 0, 1, state.characterTransparency, 0.05, "", function(val)
@@ -3063,7 +3164,12 @@ local function unlockMaxZoom()
 	updateStatusBar("Camera max zoom distance set to 100,000 studs.", "Success")
 end
 createActionButton(EspExtrasCardContent, "Unlock Camera Max Zoom", CONFIG.AVAILABILITY.LOCAL, unlockMaxZoom)
+end
 
+local function buildExecutorTab(PageExecutor: ScrollingFrame)
+end
+
+local function buildExecutorTab(PageExecutor: ScrollingFrame)
 -- EXECUTOR TAB (LUAU RUNTIME SCRIPT EVALUATOR & SCRIPT HUB)
 local _, ExecEditorCardContent = createCard(PageExecutor, "Luau Script Execution", "Direct in-game script evaluator powered by loadstring()")
 
@@ -3325,7 +3431,12 @@ for _, scriptItem in ipairs(scriptCatalog) do
 		updateStatusBar("Loaded to editor: " .. scriptItem.name, "Normal")
 	end))
 end
+end
 
+local function buildWorldTab(PageWorld: ScrollingFrame)
+end
+
+local function buildWorldTab(PageWorld: ScrollingFrame)
 -- WORLD & ENVIRONMENT TAB
 local _, GravityCardContent = createCard(PageWorld, "Workspace Gravity Mechanics", "Engine physics gravity acceleration modifier")
 
@@ -3486,7 +3597,12 @@ local function clearDebris()
 	updateStatusBar(string.format("Cleaned %d loose unanchored parts.", cleaned), "Success")
 end
 createActionButton(WorldOptCardContent, "Clear Workspace Loose Debris", CONFIG.AVAILABILITY.LOCAL, clearDebris)
+end
 
+local function buildUtilityTab(PageUtility: ScrollingFrame)
+end
+
+local function buildUtilityTab(PageUtility: ScrollingFrame)
 -- UTILITY TAB (SERVER, TOOLS & DIAGNOSTICS)
 local _, ServerCardContent = createCard(PageUtility, "Server Session Navigation", "Teleportation and instance management")
 
@@ -3622,7 +3738,12 @@ trackConnection(RunService.RenderStepped:Connect(function()
 		)
 	end
 end))
+end
 
+local function buildSettingsTab(PageSettings: ScrollingFrame)
+end
+
+local function buildSettingsTab(PageSettings: ScrollingFrame)
 -- SETTINGS TAB
 local _, ScaleCardContent = createCard(PageSettings, "Interface Scale", "Adjust viewport scale factor")
 createSlider(ScaleCardContent, "Scale Factor", 0.8, 1.25, state.guiScale, 0.05, "x", function(val)
@@ -3699,7 +3820,12 @@ HotkeyLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
 HotkeyLabel.TextSize = 11
 HotkeyLabel.TextXAlignment = Enum.TextXAlignment.Left
 HotkeyLabel.Parent = HotkeyCardContent
+end
 
+local function buildInfoTab(PageInfo: ScrollingFrame)
+end
+
+local function buildInfoTab(PageInfo: ScrollingFrame)
 -- INFORMATION TAB
 local function createInfoCard(title: string, bodyText: string)
 	local _, content = createCard(PageInfo, title)
@@ -3763,7 +3889,12 @@ sysLabel.Text = string.format("Detected Executor: %s\nPlatform Profile: %s\nTouc
 	GuiScale.Scale
 )
 sysLabel.Parent = sysDiagContent
+end
 
+local function bindEvents()
+end
+
+local function bindEvents()
 -- SECTION 7: EVENT CONNECTIONS & DRAGGING
 trackConnection(MinimizeButton.Activated:Connect(function()
 	state.isMinimized = true
@@ -3869,6 +4000,8 @@ trackConnection(RunService.Heartbeat:Connect(function()
 		updateTargetCard()
 	end
 end))
+end
+end
 
 -- SECTION 8: CLEANUP LIFECYCLE & ERROR HANDLING
 local function cleanupAll()
@@ -3928,70 +4061,31 @@ end))
 local sharedG = _G :: any
 sharedG.SentinelUtilityCleanup = cleanupAll
 
-switchTab(state.activeTab)
-updateStatusBar("Sentinel Suite ready. Press RightControl to toggle visibility.", "Normal")
 
-end)
-
--- If build fails, report and construct fallback on-screen error dialogue
-if not BUILD_OK then
-	warn("[Sentinel] BUILD FAILED: " .. tostring(BUILD_ERR))
-	local errGui = Instance.new("ScreenGui")
-	errGui.Name = "Sentinel_Error"
-	errGui.ResetOnSpawn = false
-	errGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-	errGui.IgnoreGuiInset = true
-	errGui.DisplayOrder = 20000
-
-	if typeof(syn) == "table" and typeof(syn.protect_gui) == "function" then
-		pcall(syn.protect_gui, errGui)
+-- =========================================================================
+-- SECTION 9: MODULAR ORCHESTRATION & SAFE EXECUTION
+-- Runs each builder function in an isolated frame to enforce sub-70 register footprint.
+-- =========================================================================
+local function safeBuild(sectionName: string, builderFn: () -> ())
+	local ok, err = pcall(builderFn)
+	if not ok then
+		warn(string.format("[Sentinel] Error initializing %s: %s", sectionName, tostring(err)))
 	end
-
-	errGui.Parent = TargetParent
-
-	local vp = getViewportSize()
-	local errW = math.min(500, vp.X - 20)
-	local errH = math.min(240, vp.Y - 20)
-
-	local errFrame = Instance.new("Frame")
-	errFrame.Size = UDim2.new(0, errW, 0, errH)
-	errFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-	errFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	errFrame.BackgroundColor3 = Color3.fromRGB(35, 12, 16)
-	errFrame.BorderSizePixel = 0
-	errFrame.Parent = errGui
-
-	local errCorner = Instance.new("UICorner")
-	errCorner.CornerRadius = UDim.new(0, 8)
-	errCorner.Parent = errFrame
-
-	local errStroke = Instance.new("UIStroke")
-	errStroke.Color = Color3.fromRGB(244, 63, 94)
-	errStroke.Thickness = 1
-	errStroke.Parent = errFrame
-
-	local errTitle = Instance.new("TextLabel")
-	errTitle.Size = UDim2.new(1, -24, 0, 28)
-	errTitle.Position = UDim2.new(0, 12, 0, 8)
-	errTitle.BackgroundTransparency = 1
-	errTitle.Font = CONFIG.FONTS.TITLE
-	errTitle.Text = "SENTINEL SUITE - BUILD FAILURE"
-	errTitle.TextColor3 = Color3.fromRGB(255, 100, 120)
-	errTitle.TextSize = 13
-	errTitle.TextXAlignment = Enum.TextXAlignment.Left
-	errTitle.Parent = errFrame
-
-	local errBody = Instance.new("TextLabel")
-	errBody.Size = UDim2.new(1, -24, 1, -44)
-	errBody.Position = UDim2.new(0, 12, 0, 36)
-	errBody.BackgroundTransparency = 1
-	errBody.Font = CONFIG.FONTS.MONO
-	errBody.Text = tostring(BUILD_ERR)
-	errBody.TextColor3 = Color3.fromRGB(240, 243, 248)
-	errBody.TextSize = 11
-	errBody.TextWrapped = true
-	errBody.TextXAlignment = Enum.TextXAlignment.Left
-	errBody.TextYAlignment = Enum.TextYAlignment.Top
-	errBody.Parent = errFrame
 end
+
+buildCoreContainers()
+buildAuthAndLoading()
+
+safeBuild("PlayerTools", function() buildPlayerToolsTab(PagePlayerTools) end)
+safeBuild("Troll", function() buildTrollTab(PageTroll) end)
+safeBuild("Movement", function() buildMovementTab(PageMovement) end)
+safeBuild("Visuals", function() buildVisualsTab(PageVisuals) end)
+safeBuild("Executor", function() buildExecutorTab(PageExecutor) end)
+safeBuild("World", function() buildWorldTab(PageWorld) end)
+safeBuild("Utility", function() buildUtilityTab(PageUtility) end)
+safeBuild("Settings", function() buildSettingsTab(PageSettings) end)
+safeBuild("Info", function() buildInfoTab(PageInfo) end)
+
+bindEvents()
+switchTab(state.activeTab)
+updateStatusBar("Sentinel Suite ready. Press RightControl or tap 'S' to toggle.", "Normal")
